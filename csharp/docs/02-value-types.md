@@ -1,4 +1,4 @@
-# Step 1.2: JavaScript Value Types
+# Step 1.2 & 1.3: JavaScript Value Types
 
 This document explains how JavaScript values are represented in QuickJS and how we implement the type system in C#.
 
@@ -160,9 +160,137 @@ Reasons for the tagged approach:
 3. **Compatibility**: Matches the original C implementation's design
 4. **Value semantics**: JavaScript primitives are values, not references
 
-## Next Steps
+---
 
-In [Step 1.3](02-value-types.md), we'll implement the full `JSValue` struct that combines the type tag with the actual value data.
+## Part 2: JSValue Struct (Step 1.3)
+
+The `JSValue` struct is the core type that holds any JavaScript value. It combines:
+- A type tag (`JSValueType`)
+- A numeric payload (for int32, double, bool)
+- An object reference (for strings, objects, etc.)
+
+### Struct Layout
+
+```csharp
+public readonly struct JSValue : IEquatable<JSValue>
+{
+    private readonly JSValueType _tag;
+    private readonly long _numericValue;   // Holds int32, bool, or double (via BitConverter)
+    private readonly object? _objectValue; // Holds strings, objects, etc.
+    
+    // ... implementation
+}
+```
+
+### Factory Methods
+
+JSValue uses static factory methods instead of constructors for clarity:
+
+```csharp
+// Singleton-like constants
+JSValue.Undefined     // The undefined value
+JSValue.Null          // The null value
+JSValue.True          // Boolean true
+JSValue.False         // Boolean false
+JSValue.Exception     // Indicates an exception was thrown
+
+// Factory methods
+JSValue.FromBoolean(true)      // Create from bool
+JSValue.FromInt32(42)          // Create from int
+JSValue.FromDouble(3.14)       // Create from double
+JSValue.FromString("hello")    // Create from string
+```
+
+### Type Optimization
+
+Following QuickJS's design, `FromDouble` optimizes whole numbers:
+
+```csharp
+public static JSValue FromDouble(double value)
+{
+    // If the double is actually an integer that fits in int32, store as int
+    if (value >= int.MinValue && value <= int.MaxValue)
+    {
+        int intVal = (int)value;
+        if ((double)intVal == value)
+            return new JSValue(JSValueType.Int, intVal);
+    }
+    return new JSValue(value);
+}
+```
+
+This means `FromDouble(42.0)` returns an `Int`-tagged value, saving memory and enabling faster integer operations.
+
+### Type Checking Properties
+
+```csharp
+value.IsUndefined       // true if undefined
+value.IsNull            // true if null
+value.IsNullOrUndefined // true if null or undefined
+value.IsBool            // true if boolean
+value.IsNumber          // true if int or float64
+value.IsInt             // true if int32
+value.IsString          // true if string
+value.IsObject          // true if object
+value.IsException       // true if exception marker
+```
+
+### Conversion Methods
+
+JSValue provides both throwing and try-pattern conversions:
+
+```csharp
+// Try-pattern (safe)
+if (value.TryGetInt32(out int i)) { /* use i */ }
+if (value.TryGetDouble(out double d)) { /* use d */ }
+if (value.TryGetString(out string? s)) { /* use s */ }
+
+// Throwing (when you know the type)
+int i = value.ToInt32();      // throws if not convertible
+double d = value.ToDouble();  // throws if not convertible
+```
+
+### JavaScript Coercion: ToBoolean
+
+The `ToBoolean()` method follows JavaScript's falsy value rules:
+
+```csharp
+// These are falsy in JavaScript:
+JSValue.Undefined.ToBoolean()           // false
+JSValue.Null.ToBoolean()                // false
+JSValue.False.ToBoolean()               // false
+JSValue.FromInt32(0).ToBoolean()        // false
+JSValue.FromDouble(0.0).ToBoolean()     // false
+JSValue.FromDouble(double.NaN).ToBoolean() // false
+JSValue.FromString("").ToBoolean()      // false
+
+// Everything else is truthy:
+JSValue.True.ToBoolean()                // true
+JSValue.FromInt32(42).ToBoolean()       // true
+JSValue.FromString("hello").ToBoolean() // true
+// Objects are always truthy (even empty objects)
+```
+
+### Implicit Conversions
+
+For convenience, implicit conversions from C# types are supported:
+
+```csharp
+JSValue v1 = true;        // FromBoolean
+JSValue v2 = 42;          // FromInt32
+JSValue v3 = 3.14;        // FromDouble
+JSValue v4 = "hello";     // FromString
+```
+
+### Equality
+
+JSValue implements strict equality (like JavaScript's `===`):
+
+```csharp
+JSValue.FromInt32(42) == JSValue.FromInt32(42)    // true
+JSValue.FromString("a") == JSValue.FromString("a") // true
+JSValue.Null == JSValue.Undefined                   // false (different types)
+```
 
 ## References
 

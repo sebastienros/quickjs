@@ -89,15 +89,15 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 1.3: Implement JSValue Struct
+### Step 1.3: Implement JSValue Struct ✅
 **Commit**: `step-1.3-jsvalue-struct`  
 **Doc**: `docs/02-value-types.md` (continued)
 
-- [ ] Implement `JSValue` struct with tag and payload
-- [ ] Add factory methods: `JSValue.Undefined`, `JSValue.Null`, `JSValue.FromInt32()`, etc.
-- [ ] Add type checking properties: `IsUndefined`, `IsNull`, `IsNumber`, etc.
-- [ ] Add conversion methods: `ToInt32()`, `ToDouble()`, `ToBoolean()`
-- [ ] Write comprehensive unit tests
+- [x] Implement `JSValue` struct with tag and payload
+- [x] Add factory methods: `JSValue.Undefined`, `JSValue.Null`, `JSValue.FromInt32()`, etc.
+- [x] Add type checking properties: `IsUndefined`, `IsNull`, `IsNumber`, etc.
+- [x] Add conversion methods: `ToInt32()`, `ToDouble()`, `ToBoolean()`
+- [x] Write comprehensive unit tests
 
 **Learning Goals**: C# structs, value semantics, factory pattern
 
