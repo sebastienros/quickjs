@@ -103,15 +103,15 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 1.4: Implement Atom Table
+### Step 1.4: Implement Atom Table ✅
 **Commit**: `step-1.4-atom-table`  
-**Doc**: `docs/03-atoms-and-interning.md`
+**Doc**: `docs/04-atom-table.md`
 
-- [ ] Study `quickjs-atom.h` to understand atom concept
-- [ ] Create `JSAtom` struct (lightweight identifier)
-- [ ] Create `AtomTable` class for string interning
-- [ ] Pre-populate with built-in atoms (keywords, common property names)
-- [ ] Write tests for atom creation and lookup
+- [x] Study `quickjs-atom.h` to understand atom concept
+- [x] Create `JSAtom` struct (lightweight identifier)
+- [x] Create `AtomTable` class for string interning
+- [x] Pre-populate with built-in atoms (keywords, common property names)
+- [x] Write tests for atom creation and lookup
 
 **Learning Goals**: String interning, hash tables, memory efficiency
 
