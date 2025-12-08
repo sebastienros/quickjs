@@ -165,76 +165,77 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-## Phase 3: Parser (AST)
+## Phase 3: Bytecode & Virtual Machine
 
-### Step 3.1: AST Node Definitions
-**Commit**: `step-3.1-ast-nodes`  
-**Doc**: `docs/08-ast-overview.md`
+> **Note**: QuickJS uses a one-pass bytecode compiler rather than building an AST.
+> This is more efficient and is how production JavaScript engines typically work.
+> We follow this approach to stay true to the original QuickJS design.
 
-- [ ] Parse template literals with backticks
-> **Note**: Steps 2.3-2.9 from the original plan were consolidated into Step 2.2 
-> for practical implementation. The lexer is complete and handles all token types.
+### Step 3.1: OpCode Definitions
+**Commit**: `step-3.1-opcodes`  
+**Doc**: `docs/08-opcode-definitions.md`
 
----
+- [x] Create `OpCode` enum with all bytecode instructions (~262 opcodes)
+- [x] Create `OpCodeFormat` enum for operand encoding formats
+- [x] Create `OpCodeInfo` struct with size, stack effects, format
+- [x] Create `OpCodes` static class for metadata lookup
+- [x] Comprehensive opcode tests
 
-## Phase 3: Parser (AST)
-
-### Step 3.1: AST Base and Expression Nodes
-**Commit**: `step-3.1-ast-expressions`  
-**Doc**: `docs/08-abstract-syntax-tree.md`
-
-- [ ] Create `ASTNode` base class with source location
-- [ ] Implement expression nodes (Literal, Identifier, BinaryExpression, etc.)
-- [ ] Use visitor pattern for AST traversal
-- [ ] Document AST design decisions
-
-**Learning Goals**: AST concepts, visitor pattern
+**Learning Goals**: Stack-based VM design, bytecode instruction sets
 
 ---
 
-### Step 3.2: AST Statement Nodes
-**Commit**: `step-3.2-ast-statements`  
-**Doc**: `docs/13-abstract-syntax-tree.md` (continued)
+### Step 3.2: Bytecode Emitter
+**Commit**: `step-3.2-bytecode-emitter`  
+**Doc**: `docs/09-bytecode-emitter.md`
 
-- [ ] Implement statement nodes (If, For, While, Return, etc.)
-- [ ] Implement block and program nodes
-- [ ] Write AST construction tests
+- [ ] Create `ByteCodeWriter` class (DynBuf equivalent)
+- [ ] Emit opcodes with various operand formats
+- [ ] Handle label placeholders for jumps
+- [ ] Implement bytecode patching for forward jumps
+- [ ] Create bytecode reader for verification
 
-**Learning Goals**: Statement vs expression distinction
-
----
-
-### Step 3.3: AST Declaration Nodes
-**Commit**: `step-3.3-ast-declarations`  
-**Doc**: `docs/14-declarations.md`
-
-- [ ] Implement declaration nodes (Variable, Function, Class)
-- [ ] Implement import/export nodes
-- [ ] Document hoisting implications
-
-**Learning Goals**: Declarations, hoisting
+**Learning Goals**: Bytecode emission, jump patching
 
 ---
 
-### Step 3.4: AST Pattern Nodes (Destructuring)
-**Commit**: `step-3.4-ast-patterns`  
-**Doc**: `docs/15-destructuring.md`
+### Step 3.3: Function Builder
+**Commit**: `step-3.3-function-builder`  
+**Doc**: `docs/10-function-builder.md`
 
-- [ ] Implement pattern nodes (ArrayPattern, ObjectPattern)
-- [ ] Implement rest/spread elements
-- [ ] Document destructuring semantics
+- [ ] Create `FunctionBuilder` class (JSFunctionDef equivalent)
+- [ ] Manage local variables and arguments
+- [ ] Manage constant pool (strings, numbers, nested functions)
+- [ ] Handle lexical scopes
+- [ ] Track closure variables
 
-**Learning Goals**: Destructuring patterns, ES6 features
+**Learning Goals**: Compilation context, symbol tables
 
 ---
 
-## Phase 4: Parser
+### Step 3.4: Compiled Bytecode
+**Commit**: `step-3.4-compiled-bytecode`  
+**Doc**: `docs/11-compiled-bytecode.md`
+
+- [ ] Create `JSFunctionBytecode` class
+- [ ] Store bytecode, constants, debug info
+- [ ] Implement bytecode disassembler
+- [ ] Document bytecode format
+
+**Learning Goals**: Bytecode representation, debugging support
+
+---
+
+## Phase 4: Parser & Compiler
+
+> **Note**: The parser directly emits bytecode during parsing (one-pass compilation).
 
 ### Step 4.1: Parser Infrastructure
 **Commit**: `step-4.1-parser-setup`  
-**Doc**: `docs/16-parsing-introduction.md`
+**Doc**: `docs/12-parsing-introduction.md`
 
 - [ ] Create `Parser` class consuming lexer tokens
+- [ ] Integrate with `FunctionBuilder` for bytecode emission
 - [ ] Implement token management (current, peek, advance)
 - [ ] Implement expect/match helpers
 - [ ] Create `ParseException` for syntax errors
