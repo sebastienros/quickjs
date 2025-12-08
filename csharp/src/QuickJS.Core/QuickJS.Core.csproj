@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0;net10.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>QuickJS</RootNamespace>
+    
+    <!-- Package metadata -->
+    <PackageId>QuickJS.NET</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>QuickJS.NET Contributors</Authors>
+    <Description>A C# implementation of the QuickJS JavaScript engine</Description>
+    <PackageTags>javascript;js;engine;interpreter;ecmascript</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/nicohund/quickjs</RepositoryUrl>
+    
+    <!-- Build settings -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Polyfills for netstandard2.0 -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="System.Memory" />
+    <PackageReference Include="Microsoft.Bcl.HashCode" />
+    <PackageReference Include="Nullable" PrivateAssets="all" />
+    <PackageReference Include="IsExternalInit" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
