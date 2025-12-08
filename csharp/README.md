@@ -76,14 +76,14 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 1.2: Define JSValueType Enum
+### Step 1.2: Define JSValueType Enum ✅
 **Commit**: `step-1.2-jsvalue-type`  
 **Doc**: `docs/02-value-types.md`
 
-- [ ] Study how QuickJS represents values in `quickjs.h` (`JS_TAG_*` constants)
-- [ ] Implement `JSValueType` enum mirroring QuickJS tags
-- [ ] Document the design decision: tagged values vs object hierarchy
-- [ ] Explain JavaScript's dynamic typing model
+- [x] Study how QuickJS represents values in `quickjs.h` (`JS_TAG_*` constants)
+- [x] Implement `JSValueType` enum mirroring QuickJS tags
+- [x] Document the design decision: tagged values vs object hierarchy
+- [x] Explain JavaScript's dynamic typing model
 
 **Learning Goals**: JavaScript type system, tagged union concept
 
@@ -930,7 +930,7 @@ Each completed step should be recorded here with its commit hash:
 
 | Step | Commit | Date | Notes |
 |------|--------|------|-------|
-| 1.1 | `step-1.1-create-solution` | 2024-12-08 | Solution structure, multi-targeting, initial tests |
+| 1.1 | `dd057de` | 2025-12-08 | Solution structure, multi-targeting, xUnit v3 MTP v2 |
 
 ### Phase Completion
 
