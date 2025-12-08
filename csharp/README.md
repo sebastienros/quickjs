@@ -132,14 +132,14 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ## Phase 2: Lexer/Tokenizer
 
-### Step 2.1: Token Definitions
+### Step 2.1: Token Definitions ✅
 **Commit**: `step-2.1-token-types`  
-**Doc**: `docs/05-lexical-analysis.md`
+**Doc**: `docs/06-token-definitions.md`
 
-- [ ] Define `TokenType` enum (all JavaScript tokens)
-- [ ] Define `Token` record with type, value, and location
-- [ ] Define `SourceLocation` struct for error reporting
-- [ ] Document JavaScript's lexical grammar
+- [x] Define `TokenType` enum (all JavaScript tokens)
+- [x] Define `Token` class with type, value, and location
+- [x] SourceLocation already defined in Step 1.5
+- [x] Document JavaScript's lexical grammar
 
 **Learning Goals**: Lexical analysis concepts, token classification
 
@@ -147,7 +147,7 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ### Step 2.2: Basic Lexer - Identifiers and Keywords
 **Commit**: `step-2.2-lexer-identifiers`  
-**Doc**: `docs/05-lexical-analysis.md` (continued)
+**Doc**: `docs/07-lexer-identifiers.md`
 
 - [ ] Create `Lexer` class with `ReadOnlySpan<char>` input
 - [ ] Implement identifier scanning
