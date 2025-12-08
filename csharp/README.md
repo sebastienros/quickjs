@@ -117,14 +117,14 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 1.5: Create JSException Class
+### Step 1.5: Create JSException Class ✅
 **Commit**: `step-1.5-exceptions`  
-**Doc**: `docs/04-error-handling.md`
+**Doc**: `docs/05-exception-hierarchy.md`
 
-- [ ] Create `JSException` base class
-- [ ] Create derived types: `JSSyntaxError`, `JSTypeError`, `JSReferenceError`, etc.
-- [ ] Include source location tracking
-- [ ] Design for stack trace support
+- [x] Create `JSException` base class
+- [x] Create derived types: `JSSyntaxError`, `JSTypeError`, `JSReferenceError`, etc.
+- [x] Include source location tracking (SourceLocation struct)
+- [x] Design for stack trace support (JSStackFrame, JSStackTrace)
 
 **Learning Goals**: Exception design, JavaScript error types
 
