@@ -194,6 +194,11 @@ public class JSObject
     }
 
     /// <summary>
+    /// Enumerates own enumerable properties with descriptors.
+    /// </summary>
+    public IReadOnlyDictionary<string, PropertyDescriptor> GetOwnProperties() => _properties;
+
+    /// <summary>
     /// Gets the value of an indexed property.
     /// </summary>
     /// <param name="index">The property index.</param>

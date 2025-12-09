@@ -615,6 +615,7 @@ public sealed class JSContext : IDisposable
         InitializeStringConstructor();
         InitializeArrayConstructor();
         InitializeRegExpConstructor();
+        InitializeJSON();
     }
 
     private void InitializeObjectConstructor()
@@ -1065,6 +1066,127 @@ public sealed class JSContext : IDisposable
         }, "toString", 0, functionProto)));
 
         _globalObject.Set("RegExp", JSValue.FromObject(regexCtorFn));
+    }
+
+    private void InitializeJSON()
+    {
+        var jsonObj = new JSObject(GetClassPrototype(JSClassId.Object), JSClassId.Object);
+
+        JSValue JsonParse(JSValue thisVal, JSValue[] args)
+        {
+            var json = args.Length > 0 ? JSValueConversion.ToString(args[0]) : string.Empty;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                var val = FromJsonElement(doc.RootElement);
+                return val;
+            }
+            catch (System.Text.Json.JsonException ex)
+            {
+                return ThrowSyntaxError(ex.Message);
+            }
+        }
+
+        JSValue JsonStringify(JSValue thisVal, JSValue[] args)
+        {
+            var value = args.Length > 0 ? args[0] : JSValue.Undefined;
+            try
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(ToJsonCompatible(value));
+                return JSValue.FromString(json);
+            }
+            catch (System.Text.Json.JsonException ex)
+            {
+                return ThrowTypeError(ex.Message);
+            }
+        }
+
+        jsonObj.Set("parse", JSValue.FromObject(new JSFunction(JsonParse, "parse", 1, GetClassPrototype(JSClassId.CFunction))));
+        jsonObj.Set("stringify", JSValue.FromObject(new JSFunction(JsonStringify, "stringify", 1, GetClassPrototype(JSClassId.CFunction))));
+        _globalObject.Set("JSON", JSValue.FromObject(jsonObj));
+    }
+
+    private static JSValue FromJsonElement(System.Text.Json.JsonElement elem)
+    {
+        switch (elem.ValueKind)
+        {
+            case System.Text.Json.JsonValueKind.Null:
+                return JSValue.Null;
+            case System.Text.Json.JsonValueKind.Undefined:
+                return JSValue.Undefined;
+            case System.Text.Json.JsonValueKind.False:
+                return JSValue.False;
+            case System.Text.Json.JsonValueKind.True:
+                return JSValue.True;
+            case System.Text.Json.JsonValueKind.Number:
+                if (elem.TryGetInt64(out long l))
+                    return JSValue.FromInt32((int)l);
+                if (elem.TryGetDouble(out double d))
+                    return JSValue.FromDouble(d);
+                return JSValue.FromDouble(double.NaN);
+            case System.Text.Json.JsonValueKind.String:
+                return JSValue.FromString(elem.GetString() ?? string.Empty);
+            case System.Text.Json.JsonValueKind.Array:
+                var arr = new JSObject(null, JSClassId.Array);
+                int idx = 0;
+                foreach (var item in elem.EnumerateArray())
+                {
+                    arr.Set((uint)idx++, FromJsonElement(item));
+                }
+                arr.Set("length", JSValue.FromInt32(idx));
+                return JSValue.FromObject(arr);
+            case System.Text.Json.JsonValueKind.Object:
+                var obj = new JSObject(null, JSClassId.Object);
+                foreach (var prop in elem.EnumerateObject())
+                {
+                    obj.Set(prop.Name, FromJsonElement(prop.Value));
+                }
+                return JSValue.FromObject(obj);
+            default:
+                return JSValue.Undefined;
+        }
+    }
+
+    private static object? ToJsonCompatible(JSValue value)
+    {
+        switch (value.Tag)
+        {
+            case JSValueType.Null:
+            case JSValueType.Uninitialized:
+            case JSValueType.Undefined:
+                return null;
+            case JSValueType.Bool:
+                return value.IsTrue;
+            case JSValueType.Int:
+                return value.ToInt32();
+            case JSValueType.Float64:
+                return value.ToDouble();
+            case JSValueType.String:
+                return value.ToString();
+            case JSValueType.Object:
+                var obj = value.AsObject();
+                if (obj.ClassId == JSClassId.Array)
+                {
+                    var max = (int)obj.ArrayLength;
+                    var list = new List<object?>();
+                    for (int i = 0; i < max; i++)
+                    {
+                        list.Add(ToJsonCompatible(obj.Get((uint)i)));
+                    }
+                    return list;
+                }
+                else
+                {
+                    var dict = new Dictionary<string, object?>();
+                    foreach (var kvp in obj.GetOwnProperties())
+                    {
+                        dict[kvp.Key] = ToJsonCompatible(kvp.Value.Value);
+                    }
+                    return dict;
+                }
+            default:
+                return null;
+        }
     }
 
     #endregion
