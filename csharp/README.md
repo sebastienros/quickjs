@@ -49,13 +49,13 @@ Use `#if` directives when needed:
 | Phase 1: Core Types | ✅ Complete | 5/5 | ~50 |
 | Phase 2: Lexer | ✅ Complete | 2/2 | ~100 |
 | Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
-| Phase 4: Parser | 🔄 In Progress | 4/8 | ~1700 |
+| Phase 4: Parser | 🔄 In Progress | 5/8 | ~1800 |
 | Phase 5: Runtime Objects | ⏳ Planned | 0/4 | - |
 | Phase 6: VM & Interpreter | ⏳ Planned | 0/7 | - |
 
-**Total Tests: 1954** (all passing, 0 skipped)
+**Total Tests: 2042** (all passing, 0 skipped)
 
-**Latest Commit**: `step-4.4-complete-expression-parser` + lookahead for arrow functions
+**Latest Commit**: `step-4.5-class-parser`
 
 # Detailed Implementation Plan
 
@@ -339,21 +339,24 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 4.5: Class Parser
+### Step 4.5: Class Parser ✅
 **Commit**: `step-4.5-class-parser`  
 **Doc**: `docs/17-class-parser.md`
 
-- [ ] Parse class declarations
-- [ ] Parse class expressions
-- [ ] Parse constructor method
-- [ ] Parse instance and static methods
-- [ ] Parse getter/setter accessors
-- [ ] Parse field declarations
-- [ ] Parse private members (#private)
-- [ ] Parse computed property names
-- [ ] Write class tests
+- [x] Parse class declarations
+- [x] Parse class expressions
+- [x] Parse constructor method
+- [x] Parse instance and static methods
+- [x] Parse getter/setter accessors
+- [x] Parse field declarations
+- [x] Parse private members (#private)
+- [x] Parse computed property names
+- [x] Parse async and generator methods
+- [x] Parse static initialization blocks
+- [x] Handle keywords as method names (get, set, static, async)
+- [x] Write class tests (44 test methods)
 
-**Learning Goals**: Class syntax, prototype chain setup
+**Learning Goals**: Class syntax, prototype chain setup, lookahead patterns
 
 ---
 

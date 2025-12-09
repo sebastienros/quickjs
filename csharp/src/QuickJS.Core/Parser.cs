@@ -94,6 +94,83 @@ public sealed class Parser
     public bool Check(TokenType type) => _currentToken.Type == type;
 
     /// <summary>
+    /// Returns true if the current token can be used as a property name.
+    /// This includes identifiers, strings, numbers, and reserved words (keywords).
+    /// In JavaScript, reserved words are valid as property names.
+    /// </summary>
+    private bool IsPropertyNameToken()
+    {
+        return _currentToken.Type == TokenType.Identifier ||
+               _currentToken.Type == TokenType.String ||
+               _currentToken.Type == TokenType.Number ||
+               IsKeyword(_currentToken.Type);
+    }
+
+    /// <summary>
+    /// Returns true if the token type is a keyword that can be used as a property name.
+    /// </summary>
+    private static bool IsKeyword(TokenType type)
+    {
+        return type == TokenType.If ||
+               type == TokenType.Else ||
+               type == TokenType.For ||
+               type == TokenType.While ||
+               type == TokenType.Do ||
+               type == TokenType.Switch ||
+               type == TokenType.Case ||
+               type == TokenType.Default ||
+               type == TokenType.Break ||
+               type == TokenType.Continue ||
+               type == TokenType.Return ||
+               type == TokenType.Throw ||
+               type == TokenType.Try ||
+               type == TokenType.Catch ||
+               type == TokenType.Finally ||
+               type == TokenType.Function ||
+               type == TokenType.Var ||
+               type == TokenType.Let ||
+               type == TokenType.Const ||
+               type == TokenType.Class ||
+               type == TokenType.Extends ||
+               type == TokenType.New ||
+               type == TokenType.This ||
+               type == TokenType.Super ||
+               type == TokenType.Import ||
+               type == TokenType.Export ||
+               type == TokenType.TypeOf ||
+               type == TokenType.InstanceOf ||
+               type == TokenType.In ||
+               type == TokenType.Of ||
+               type == TokenType.Void ||
+               type == TokenType.Delete ||
+               type == TokenType.Null ||
+               type == TokenType.True ||
+               type == TokenType.False ||
+               type == TokenType.With ||
+               type == TokenType.Debugger ||
+               type == TokenType.Static ||
+               type == TokenType.Yield ||
+               type == TokenType.Await ||
+               type == TokenType.Async;
+    }
+
+    /// <summary>
+    /// Gets the name of the current token as a property name.
+    /// Works for identifiers, strings, numbers, and keywords.
+    /// </summary>
+    private string GetPropertyName()
+    {
+        if (_currentToken.Type == TokenType.Identifier)
+            return (string)_currentToken.Value!;
+        if (_currentToken.Type == TokenType.String)
+            return (string)_currentToken.Value!;
+        if (_currentToken.Type == TokenType.Number)
+            return _currentToken.Value!.ToString()!;
+        // For keywords, use the token type name in lowercase
+        return _currentToken.Type.ToString().ToLowerInvariant();
+    }
+
+    /// <summary>
     /// Consumes the current token if it matches, otherwise throws.
     /// </summary>
     public void Expect(TokenType type)
@@ -999,6 +1076,11 @@ public sealed class Parser
                 ParseSuperExpression();
                 break;
 
+            case TokenType.Class:
+                // class expression
+                ParseClass(isExpression: true);
+                break;
+
             default:
                 throw new JSSyntaxError(
                     $"Unexpected token: {_currentToken.Type}",
@@ -1440,6 +1522,400 @@ public sealed class Parser
         }
     }
 
+    // ========================
+    // Class Parsing
+    // ========================
+
+    /// <summary>
+    /// Parses a class declaration: class ClassName { ... }
+    /// </summary>
+    private void ParseClassDeclaration()
+    {
+        ParseClass(isExpression: false);
+    }
+
+    /// <summary>
+    /// Parses a class expression: class { ... } or class ClassName { ... }
+    /// </summary>
+    private void ParseClassExpression()
+    {
+        ParseClass(isExpression: true);
+    }
+
+    /// <summary>
+    /// Core class parsing logic, shared by declaration and expression.
+    /// Follows QuickJS js_parse_class implementation.
+    /// </summary>
+    private void ParseClass(bool isExpression)
+    {
+        NextToken(); // consume 'class'
+
+        JSAtom className = JSAtom.Empty;
+        bool hasName = false;
+
+        // Parse optional/required class name
+        if (Check(TokenType.Identifier))
+        {
+            var name = (string)_currentToken.Value!;
+            className = _atoms.GetOrCreateAtom(name);
+            hasName = true;
+            NextToken();
+        }
+        else if (!isExpression)
+        {
+            throw new JSSyntaxError(
+                "Class declaration requires a name",
+                _currentToken.Start);
+        }
+
+        // If it's a declaration, define the variable for the class (like let)
+        if (!isExpression && hasName)
+        {
+            _currentFunction.AddVar(className, JSVarKind.Normal, isConst: false, isLexical: true);
+        }
+
+        // Parse optional extends clause
+        bool hasHeritage = false;
+        if (Match(TokenType.Extends))
+        {
+            // Parse the parent class expression
+            ParseMemberExpression();
+            hasHeritage = true;
+        }
+        else
+        {
+            // No parent - push undefined as the parent
+            EmitOp(OpCode.Undefined);
+        }
+
+        // Define the class (pushes constructor function and prototype on stack)
+        EmitOp(OpCode.DefineClass);
+        EmitAtom(className);
+        EmitU8((byte)(hasHeritage ? 1 : 0));
+
+        // Expect class body
+        Expect(TokenType.LeftBrace);
+
+        // Parse class body
+        ParseClassBody();
+
+        Expect(TokenType.RightBrace);
+
+        // The DefineClass opcode leaves the constructor on the stack.
+        // If it's a declaration, store it in the variable.
+        if (!isExpression && hasName)
+        {
+            EmitOp(OpCode.ScopePutVar);
+            EmitAtom(className);
+            EmitU16((ushort)_currentFunction.ScopeLevel);
+        }
+        // If it's an expression, the constructor stays on the stack as the result.
+    }
+
+    /// <summary>
+    /// Parses the body of a class (methods, getters, setters, static members)
+    /// </summary>
+    private void ParseClassBody()
+    {
+        while (!Check(TokenType.RightBrace) && !Check(TokenType.EOF))
+        {
+            // Skip semicolons (empty class elements)
+            if (Match(TokenType.Semicolon))
+                continue;
+
+            ParseClassElement();
+        }
+    }
+
+    /// <summary>
+    /// Parses a single class element (method, getter, setter, field)
+    /// </summary>
+    private void ParseClassElement()
+    {
+        bool isStatic = false;
+        bool isGetter = false;
+        bool isSetter = false;
+        bool isGenerator = false;
+        bool isAsync = false;
+        bool isComputed = false;
+        bool isPrivate = false;
+        JSAtom methodName = JSAtom.Empty;
+
+        // Check for static keyword
+        if (Check(TokenType.Static))
+        {
+            // Could be 'static' as a modifier or 'static' as a method name
+            // Look ahead to see if it's followed by a method definition
+            // Save position and token BEFORE consuming 'static' so we can restore it properly
+            var savedToken = _currentToken;
+            var savedPos = _lexer.SavePosition();
+            NextToken(); // consume 'static'
+
+            if (Check(TokenType.LeftBrace))
+            {
+                // static { ... } - static initialization block
+                ParseStaticBlock();
+                return;
+            }
+            else if (Check(TokenType.LeftParen) || Check(TokenType.Semicolon))
+            {
+                // 'static' is the method name itself - restore and continue to property name parsing
+                _lexer.RestorePosition(savedPos);
+                _currentToken = savedToken;
+            }
+            else
+            {
+                // 'static' is a modifier
+                isStatic = true;
+            }
+        }
+
+        // Check for async
+        if (Check(TokenType.Async))
+        {
+            // Look ahead to determine if 'async' is a modifier or method name
+            // Save position BEFORE consuming 'async' so we can restore it properly
+            var savedToken = _currentToken;
+            var savedPos = _lexer.SavePosition();
+            NextToken(); // consume 'async'
+
+            if (!_currentToken.HasLineTerminatorBefore &&
+                !Check(TokenType.LeftParen) &&
+                !Check(TokenType.Colon) &&
+                !Check(TokenType.Assign) &&
+                !Check(TokenType.Semicolon) &&
+                !Check(TokenType.RightBrace))
+            {
+                // 'async' is a modifier
+                isAsync = true;
+            }
+            else
+            {
+                // 'async' is the method name - restore and continue to property name parsing
+                _lexer.RestorePosition(savedPos);
+                _currentToken = savedToken;
+            }
+        }
+
+        // Check for generator (*)
+        if (Match(TokenType.Asterisk))
+        {
+            isGenerator = true;
+        }
+
+        // Check for get/set
+        if (Check(TokenType.Identifier))
+        {
+            var name = (string)_currentToken.Value!;
+            if (name == "get" || name == "set")
+            {
+                // Save position BEFORE consuming get/set so we can restore it properly
+                var savedToken = _currentToken;
+                var savedPos = _lexer.SavePosition();
+                NextToken(); // consume get/set
+
+                // If followed by property name, it's a getter/setter
+                if (Check(TokenType.Identifier) ||
+                    Check(TokenType.String) ||
+                    Check(TokenType.Number) ||
+                    Check(TokenType.LeftBracket) ||
+                    Check(TokenType.PrivateName))
+                {
+                    isGetter = name == "get";
+                    isSetter = name == "set";
+                }
+                else
+                {
+                    // 'get' or 'set' is the method name - restore and continue to property name parsing
+                    _lexer.RestorePosition(savedPos);
+                    _currentToken = savedToken;
+                }
+            }
+        }
+
+        // Parse the property name
+        if (Check(TokenType.LeftBracket))
+        {
+            // Computed property name: [expr]
+            isComputed = true;
+            NextToken(); // consume '['
+            ParseAssignExpression();
+            Expect(TokenType.RightBracket);
+        }
+        else if (Check(TokenType.PrivateName))
+        {
+            // Private field/method: #name
+            isPrivate = true;
+            var name = (string)_currentToken.Value!;
+            methodName = _atoms.GetOrCreateAtom(name);
+            NextToken();
+        }
+        else if (IsPropertyNameToken())
+        {
+            // Regular property name (identifier, string, number, or keyword)
+            var name = GetPropertyName();
+            methodName = _atoms.GetOrCreateAtom(name);
+            NextToken();
+        }
+        else
+        {
+            throw new JSSyntaxError(
+                "Expected method name",
+                _currentToken.Start);
+        }
+
+        // Check if this is a field (has initializer or semicolon without parens)
+        if (!Check(TokenType.LeftParen) && !isGetter && !isSetter)
+        {
+            // This is a class field
+            ParseClassField(methodName, isStatic, isPrivate, isComputed);
+            return;
+        }
+
+        // Parse the method
+        ParseClassMethod(methodName, isStatic, isGetter, isSetter, isAsync, isGenerator, isPrivate, isComputed);
+    }
+
+    /// <summary>
+    /// Parses a class field: name = value;
+    /// </summary>
+    private void ParseClassField(JSAtom fieldName, bool isStatic, bool isPrivate, bool isComputed)
+    {
+        // Field value initializer (optional)
+        if (Match(TokenType.Assign))
+        {
+            ParseAssignExpression();
+        }
+        else
+        {
+            EmitOp(OpCode.Undefined);
+        }
+
+        // Emit field definition
+        byte flags = 0;
+        if (isStatic) flags |= 0x01;
+        if (isPrivate) flags |= 0x02;
+
+        if (isComputed)
+        {
+            EmitOp(OpCode.DefineField);
+            EmitU8(flags);
+        }
+        else
+        {
+            EmitOp(OpCode.DefineField);
+            EmitAtom(fieldName);
+            EmitU8(flags);
+        }
+
+        // Optional semicolon
+        Match(TokenType.Semicolon);
+    }
+
+    /// <summary>
+    /// Parses a class method definition
+    /// </summary>
+    private void ParseClassMethod(
+        JSAtom methodName,
+        bool isStatic,
+        bool isGetter,
+        bool isSetter,
+        bool isAsync,
+        bool isGenerator,
+        bool isPrivate,
+        bool isComputed)
+    {
+        // Determine the function kind
+        var funcKind = JSFunctionKind.Normal;
+        if (isAsync) funcKind |= JSFunctionKind.Async;
+        if (isGenerator) funcKind |= JSFunctionKind.Generator;
+
+        // Determine parse type
+        var parseType = JSParseFunctionType.Method;
+        if (isGetter) parseType = JSParseFunctionType.Getter;
+        if (isSetter) parseType = JSParseFunctionType.Setter;
+
+        // Determine if this is a constructor
+        bool isConstructor = !isStatic && !isGetter && !isSetter && !isPrivate &&
+                             methodName == _atoms.GetOrCreateAtom("constructor");
+
+        if (isConstructor)
+        {
+            parseType = JSParseFunctionType.Method;
+            funcKind = JSFunctionKind.Normal;
+            if (isAsync || isGenerator)
+            {
+                throw new JSSyntaxError(
+                    "Constructor cannot be async or a generator",
+                    _currentToken.Start);
+            }
+        }
+
+        // Parse the method function
+        ParseFunction(parseType, funcKind, methodName);
+
+        // Emit method definition
+        byte flags = 0;
+        if (isStatic) flags |= 0x01;
+        if (isGetter) flags |= 0x02;
+        if (isSetter) flags |= 0x04;
+        if (isPrivate) flags |= 0x08;
+
+        if (isComputed)
+        {
+            EmitOp(OpCode.DefineMethodComputed);
+            EmitU8(flags);
+        }
+        else
+        {
+            EmitOp(OpCode.DefineMethod);
+            EmitAtom(methodName);
+            EmitU8(flags);
+        }
+    }
+
+    /// <summary>
+    /// Parses a static initialization block: static { ... }
+    /// </summary>
+    private void ParseStaticBlock()
+    {
+        // Create a new function for the static block
+        var parentFunction = _currentFunction;
+        var staticBlockName = _atoms.GetOrCreateAtom("static_block");
+        var blockFunction = new JSFunctionDef(staticBlockName);
+        _currentFunction = blockFunction;
+        _currentFunction.PushScope();
+
+        Expect(TokenType.LeftBrace);
+
+        // Parse the block body
+        while (!Check(TokenType.RightBrace) && !Check(TokenType.EOF))
+        {
+            ParseStatement();
+        }
+
+        Expect(TokenType.RightBrace);
+
+        _currentFunction.PopScope();
+
+        // Finalize the static block function
+        if (!EndsWithReturn())
+        {
+            EmitOp(OpCode.Undefined);
+            EmitOp(OpCode.Return);
+        }
+
+        int funcIdx = parentFunction.AddChildFunction(blockFunction);
+        _currentFunction = parentFunction;
+
+        // Emit the static block execution
+        EmitOp(OpCode.FClosure);
+        EmitU16((ushort)funcIdx);
+        EmitOp(OpCode.CallMethod);
+        EmitU16(0); // no arguments
+        EmitOp(OpCode.Drop); // discard result
+    }
+
     private void EmitNumberLiteral()
     {
         var value = _currentToken.Value;
@@ -1777,6 +2253,11 @@ public sealed class Parser
             case TokenType.Async:
                 // async function declaration
                 ParseAsyncFunctionDeclaration();
+                break;
+
+            case TokenType.Class:
+                // class declaration
+                ParseClassDeclaration();
                 break;
 
             default:
