@@ -42,6 +42,21 @@ Use `#if` directives when needed:
 4. **Working code at each step**: Every commit should result in compiling, testable code
 5. **Learn by doing**: Follow along by implementing each step yourself, or study the commits
 
+## Current Progress
+
+| Phase | Status | Steps | Tests |
+|-------|--------|-------|-------|
+| Phase 1: Core Types | ✅ Complete | 5/5 | ~50 |
+| Phase 2: Lexer | ✅ Complete | 2/2 | ~100 |
+| Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
+| Phase 4: Parser | 🔄 In Progress | 4/8 | ~1700 |
+| Phase 5: Runtime Objects | ⏳ Planned | 0/4 | - |
+| Phase 6: VM & Interpreter | ⏳ Planned | 0/7 | - |
+
+**Total Tests: 1954** (all passing, 0 skipped)
+
+**Latest Commit**: `step-4.4-complete-expression-parser` + lookahead for arrow functions
+
 # Detailed Implementation Plan
 
 > **Tutorial Format**: Each step below corresponds to a **single git commit** with its own documentation file in the `docs/` folder. The documentation explains the *what*, *why*, and *how* of each implementation step. This plan may be adjusted as the implementation progresses and new insights emerge.
@@ -171,7 +186,7 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 > This is more efficient and is how production JavaScript engines typically work.
 > We follow this approach to stay true to the original QuickJS design.
 
-### Step 3.1: OpCode Definitions
+### Step 3.1: OpCode Definitions ✅
 **Commit**: `step-3.1-opcodes`  
 **Doc**: `docs/08-opcode-definitions.md`
 
@@ -185,44 +200,56 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 3.2: Bytecode Emitter
-**Commit**: `step-3.2-bytecode-emitter`  
-**Doc**: `docs/09-bytecode-emitter.md`
+### Step 3.2: Bytecode Buffer ✅
+**Commit**: `step-3.2-bytecode-buffer`  
+**Doc**: `docs/09-bytecode-buffer.md`
 
-- [ ] Create `ByteCodeWriter` class (DynBuf equivalent)
-- [ ] Emit opcodes with various operand formats
-- [ ] Handle label placeholders for jumps
-- [ ] Implement bytecode patching for forward jumps
-- [ ] Create bytecode reader for verification
+- [x] Create `ByteCodeBuffer` class (DynBuf equivalent)
+- [x] Emit opcodes with various operand formats
+- [x] Handle label placeholders for jumps
+- [x] Implement bytecode patching for forward jumps
+- [x] Create bytecode reader for verification
 
 **Learning Goals**: Bytecode emission, jump patching
 
 ---
 
-### Step 3.3: Function Builder
-**Commit**: `step-3.3-function-builder`  
-**Doc**: `docs/10-function-builder.md`
+### Step 3.3: Constant Pool ✅
+**Commit**: `step-3.3-constant-pool`  
+**Doc**: `docs/10-constant-pool.md`
 
-- [ ] Create `FunctionBuilder` class (JSFunctionDef equivalent)
-- [ ] Manage local variables and arguments
-- [ ] Manage constant pool (strings, numbers, nested functions)
-- [ ] Handle lexical scopes
-- [ ] Track closure variables
+- [x] Create `ConstantPool` class for bytecode constants
+- [x] Support integers, doubles, strings, atoms
+- [x] Deduplicate constants for efficiency
+- [x] Comprehensive constant pool tests
+
+**Learning Goals**: Constant pool design, value deduplication
+
+---
+
+### Step 3.4: Function Definition ✅
+**Commit**: `step-3.4-function-definition`  
+**Doc**: `docs/11-function-definition.md`
+
+- [x] Create `JSFunctionDef` class (JSFunctionDef equivalent)
+- [x] Manage local variables and arguments
+- [x] Manage constant pool (strings, numbers, nested functions)
+- [x] Handle lexical scopes
+- [x] Track closure variables
 
 **Learning Goals**: Compilation context, symbol tables
 
 ---
 
-### Step 3.4: Compiled Bytecode
-**Commit**: `step-3.4-compiled-bytecode`  
-**Doc**: `docs/11-compiled-bytecode.md`
+### Step 3.5: Line Number Table ✅
+**Commit**: `step-3.5-line-number-table`  
+**Doc**: `docs/12-line-number-table.md`
 
-- [ ] Create `JSFunctionBytecode` class
-- [ ] Store bytecode, constants, debug info
-- [ ] Implement bytecode disassembler
-- [ ] Document bytecode format
+- [x] Create `LineNumberTable` for debugging
+- [x] Track bytecode offset to source line mapping
+- [x] Support debug information generation
 
-**Learning Goals**: Bytecode representation, debugging support
+**Learning Goals**: Debug information, source mapping
 
 ---
 
@@ -230,112 +257,109 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 > **Note**: The parser directly emits bytecode during parsing (one-pass compilation).
 
-### Step 4.1: Parser Infrastructure
-**Commit**: `step-4.1-parser-setup`  
-**Doc**: `docs/12-parsing-introduction.md`
+### Step 4.1: Expression Parser ✅
+**Commit**: `step-4.1-expression-parser`  
+**Doc**: `docs/13-parser.md`
 
-- [ ] Create `Parser` class consuming lexer tokens
-- [ ] Integrate with `FunctionBuilder` for bytecode emission
-- [ ] Implement token management (current, peek, advance)
-- [ ] Implement expect/match helpers
-- [ ] Create `ParseException` for syntax errors
+- [x] Create `Parser` class consuming lexer tokens
+- [x] Integrate with `JSFunctionDef` for bytecode emission
+- [x] Implement token management (current, peek, advance)
+- [x] Implement expect/match helpers
+- [x] Parse literals (number, string, boolean, null, undefined)
+- [x] Parse identifiers
+- [x] Parse parenthesized expressions
+- [x] Parse array literals
+- [x] Parse object literals
+- [x] Implement Pratt parser / precedence climbing
+- [x] Parse unary operators
+- [x] Parse binary operators with correct precedence
+- [x] Parse ternary conditional
+- [x] Parse assignment operators
+- [x] Parse property access (dot notation)
+- [x] Parse computed property access (bracket notation)
+- [x] Parse function calls
+- [x] Parse `new` expressions
+- [x] Parse optional chaining (`?.`)
+- [x] Comprehensive expression tests
 
-**Learning Goals**: Parser design, token stream management
-
----
-
-### Step 4.2: Parse Primary Expressions
-**Commit**: `step-4.2-parse-primary`  
-**Doc**: `docs/17-parsing-expressions.md`
-
-- [ ] Parse literals (number, string, boolean, null)
-- [ ] Parse identifiers
-- [ ] Parse parenthesized expressions
-- [ ] Parse array literals
-- [ ] Parse object literals
-- [ ] Write expression tests
-
-**Learning Goals**: Recursive descent parsing basics
-
----
-
-### Step 4.3: Parse Operators with Precedence
-**Commit**: `step-4.3-parse-operators`  
-**Doc**: `docs/18-operator-precedence.md`
-
-- [ ] Implement Pratt parser / precedence climbing
-- [ ] Parse unary operators
-- [ ] Parse binary operators with correct precedence
-- [ ] Parse ternary conditional
-- [ ] Parse assignment operators
-- [ ] Write precedence tests
-
-**Learning Goals**: Pratt parsing, operator precedence
+**Learning Goals**: Recursive descent parsing, Pratt parsing, operator precedence
 
 ---
 
-### Step 4.4: Parse Member and Call Expressions
-**Commit**: `step-4.4-parse-calls`  
-**Doc**: `docs/19-member-call-expressions.md`
+### Step 4.2: Statement Parser ✅
+**Commit**: `step-4.2-statement-parser`  
+**Doc**: `docs/14-statement-parser.md`
 
-- [ ] Parse property access (dot notation)
-- [ ] Parse computed property access (bracket notation)
-- [ ] Parse function calls
-- [ ] Parse `new` expressions
-- [ ] Parse optional chaining (`?.`)
-- [ ] Write call expression tests
+- [x] Parse expression statements
+- [x] Parse block statements
+- [x] Parse variable declarations (var, let, const)
+- [x] Parse if/else statements
+- [x] Parse for/while/do-while loops
+- [x] Parse for-in/for-of loops
+- [x] Parse switch statements
+- [x] Parse try/catch/finally
+- [x] Parse return/break/continue/throw
+- [x] Comprehensive statement tests
 
-**Learning Goals**: Left-recursive grammar handling
-
----
-
-### Step 4.5: Parse Function Expressions
-**Commit**: `step-4.5-parse-functions`  
-**Doc**: `docs/20-functions.md`
-
-- [ ] Parse function expressions
-- [ ] Parse arrow functions
-- [ ] Parse parameter lists (with defaults, rest)
-- [ ] Parse function bodies
-- [ ] Write function tests
-
-**Learning Goals**: Function syntax variations
+**Learning Goals**: Statement parsing patterns, control flow
 
 ---
 
-### Step 4.6: Parse Statements
-**Commit**: `step-4.6-parse-statements`  
-**Doc**: `docs/21-parsing-statements.md`
+### Step 4.3: Function Parser ✅
+**Commit**: `step-4.3-function-parser`  
+**Doc**: `docs/15-function-parser.md`
 
-- [ ] Parse expression statements
-- [ ] Parse block statements
-- [ ] Parse if/else statements
-- [ ] Parse for/while/do-while loops
-- [ ] Parse switch statements
-- [ ] Parse try/catch/finally
-- [ ] Parse return/break/continue/throw
-- [ ] Write statement tests
+- [x] Parse function declarations
+- [x] Parse function expressions
+- [x] Parse parameter lists (with defaults, rest)
+- [x] Parse function bodies
+- [x] Parse generator functions (function*)
+- [x] Parse async functions
+- [x] Nested function handling
+- [x] Comprehensive function tests
 
-**Learning Goals**: Statement parsing patterns
+**Learning Goals**: Function syntax variations, generators, async
 
 ---
 
-### Step 4.7: Parse Declarations
-**Commit**: `step-4.7-parse-declarations`  
-**Doc**: `docs/22-parsing-declarations.md`
+### Step 4.4: Complete Expression Parser ✅
+**Commit**: `step-4.4-complete-expression-parser`  
+**Doc**: `docs/16-complete-expression-parser.md`
 
-- [ ] Parse variable declarations (var, let, const)
-- [ ] Parse function declarations
+- [x] Parse arrow functions (with lookahead disambiguation)
+- [x] Parse yield expressions (in generators)
+- [x] Parse await expressions (in async functions)
+- [x] Parse super expressions (super(), super.prop, super[expr])
+- [x] Add lexer position save/restore for lookahead
+- [x] Add PeekToken() and SkipParensToken() for arrow detection
+- [x] Enable all arrow function test cases
+- [x] Comprehensive expression tests
+
+**Learning Goals**: Arrow function parsing, lookahead, context-sensitive parsing
+
+---
+
+### Step 4.5: Class Parser
+**Commit**: `step-4.5-class-parser`  
+**Doc**: `docs/17-class-parser.md`
+
 - [ ] Parse class declarations
-- [ ] Write declaration tests
+- [ ] Parse class expressions
+- [ ] Parse constructor method
+- [ ] Parse instance and static methods
+- [ ] Parse getter/setter accessors
+- [ ] Parse field declarations
+- [ ] Parse private members (#private)
+- [ ] Parse computed property names
+- [ ] Write class tests
 
-**Learning Goals**: Declaration hoisting, temporal dead zone
+**Learning Goals**: Class syntax, prototype chain setup
 
 ---
 
-### Step 4.8: Parse Modules
-**Commit**: `step-4.8-parse-modules`  
-**Doc**: `docs/23-modules.md`
+### Step 4.6: Module Parser
+**Commit**: `step-4.6-module-parser`  
+**Doc**: `docs/18-module-parser.md`
 
 - [ ] Parse import declarations
 - [ ] Parse export declarations
@@ -346,9 +370,24 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 4.9: Parser Error Recovery
-**Commit**: `step-4.9-parser-errors`  
-**Doc**: `docs/24-error-recovery.md`
+### Step 4.7: Destructuring Parser
+**Commit**: `step-4.7-destructuring-parser`  
+**Doc**: `docs/19-destructuring-parser.md`
+
+- [ ] Parse array destructuring patterns
+- [ ] Parse object destructuring patterns
+- [ ] Parse destructuring in variable declarations
+- [ ] Parse destructuring in function parameters
+- [ ] Parse destructuring in assignments
+- [ ] Write destructuring tests
+
+**Learning Goals**: Pattern matching, destructuring assignment
+
+---
+
+### Step 4.8: Parser Error Recovery
+**Commit**: `step-4.8-parser-errors`  
+**Doc**: `docs/20-error-recovery.md`
 
 - [ ] Implement synchronization points
 - [ ] Collect multiple errors per parse
@@ -359,113 +398,71 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-## Phase 5: Bytecode Compiler
-
-### Step 5.1: Bytecode Definitions
-**Commit**: `step-5.1-bytecode-defs`  
-**Doc**: `docs/25-bytecode-introduction.md`
-
-- [ ] Study `quickjs-opcode.h` opcodes
-- [ ] Define `Opcode` enum
-- [ ] Define `Instruction` struct
-- [ ] Define `BytecodeFunction` class
-- [ ] Define `ConstantPool` class
-- [ ] Document stack-based VM design
-
-**Learning Goals**: Bytecode concepts, stack-based VMs
-
----
-
-### Step 5.2: Scope Analysis
-**Commit**: `step-5.2-scope-analysis`  
-**Doc**: `docs/26-scope-analysis.md`
+## Phase 5: Runtime Objects
 
 - [ ] Implement `Scope` class
 - [ ] Build scope tree from AST
-- [ ] Resolve variable declarations
-- [ ] Detect free variables (closures)
-- [ ] Handle var vs let/const scoping
-- [ ] Write scope analysis tests
+### Step 5.1: JSObject Implementation
+**Commit**: `step-5.1-jsobject`  
+**Doc**: `docs/21-jsobject.md`
 
-**Learning Goals**: Lexical scoping, closure detection
+- [ ] Implement `JSObject` class
+- [ ] Implement property storage (indexed and named)
+- [ ] Implement property descriptors
+- [ ] Implement extensibility control
+- [ ] Write object tests
 
----
-
-### Step 5.3: Compile Expressions
-**Commit**: `step-5.3-compile-expressions`  
-**Doc**: `docs/27-compiling-expressions.md`
-
-- [ ] Create `BytecodeCompiler` AST visitor
-- [ ] Compile literals (push constants)
-- [ ] Compile identifiers (variable loads)
-- [ ] Compile operators
-- [ ] Compile property access
-- [ ] Write compiler tests
-
-**Learning Goals**: Expression compilation, stack effects
+**Learning Goals**: JavaScript object model, property descriptors
 
 ---
 
-### Step 5.4: Compile Control Flow
-**Commit**: `step-5.4-compile-control-flow`  
-**Doc**: `docs/28-control-flow.md`
+### Step 5.2: Prototype Chain
+**Commit**: `step-5.2-prototypes`  
+**Doc**: `docs/22-prototype-chain.md`
 
-- [ ] Compile if/else (conditional jumps)
-- [ ] Compile loops (jump, loop labels)
-- [ ] Compile switch statements
-- [ ] Compile break/continue (jump patching)
-- [ ] Write control flow tests
+- [ ] Implement prototype chain lookup
+- [ ] Implement Object.getPrototypeOf / setPrototypeOf
+- [ ] Implement Object.create
+- [ ] Handle null prototype case
+- [ ] Write prototype tests
 
-**Learning Goals**: Jump instructions, label resolution
-
----
-
-### Step 5.5: Compile Functions
-**Commit**: `step-5.5-compile-functions`  
-**Doc**: `docs/29-compiling-functions.md`
-
-- [ ] Compile function declarations/expressions
-- [ ] Handle parameters and arguments
-- [ ] Compile return statements
-- [ ] Handle closures and upvalues
-- [ ] Write function compilation tests
-
-**Learning Goals**: Function compilation, upvalue handling
+**Learning Goals**: Prototype-based inheritance
 
 ---
 
-### Step 5.6: Compile Exception Handling
-**Commit**: `step-5.6-compile-exceptions`  
-**Doc**: `docs/30-exception-handling.md`
+### Step 5.3: JSFunction Runtime
+**Commit**: `step-5.3-jsfunction`  
+**Doc**: `docs/23-jsfunction.md`
 
-- [ ] Compile try/catch/finally
-- [ ] Compile throw statements
-- [ ] Handle exception tables
-- [ ] Write exception tests
+- [ ] Create `JSFunction` class wrapping bytecode
+- [ ] Implement function call mechanics
+- [ ] Implement closures (captured variables)
+- [ ] Implement bound functions
+- [ ] Write function runtime tests
 
-**Learning Goals**: Exception table design
-
----
-
-### Step 5.7: Compile Classes
-**Commit**: `step-5.7-compile-classes`  
-**Doc**: `docs/31-compiling-classes.md`
-
-- [ ] Compile class declarations
-- [ ] Compile constructors
-- [ ] Compile methods and properties
-- [ ] Handle inheritance
-- [ ] Write class compilation tests
-
-**Learning Goals**: Class desugaring
+**Learning Goals**: Function objects, closures
 
 ---
 
-## Phase 6: Runtime & Interpreter
+### Step 5.4: Array Object
+**Commit**: `step-5.4-array-object`  
+**Doc**: `docs/24-array-object.md`
+
+- [ ] Implement JSArray with indexed properties
+- [ ] Implement length property behavior
+- [ ] Implement array methods (push, pop, etc.)
+- [ ] Implement array iteration
+- [ ] Write array tests
+
+**Learning Goals**: Array implementation, exotic objects
+
+---
+
+## Phase 6: Virtual Machine & Interpreter
 
 ### Step 6.1: Runtime Infrastructure
 **Commit**: `step-6.1-runtime-setup`  
-**Doc**: `docs/32-runtime-architecture.md`
+**Doc**: `docs/25-runtime-architecture.md`
 
 - [ ] Implement `JSRuntime` class
 - [ ] Implement `JSContext` class
@@ -476,23 +473,9 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 6.2: Object System Basics
-**Commit**: `step-6.2-object-system`  
-**Doc**: `docs/33-object-model.md`
-
-- [ ] Implement `JSObject` class
-- [ ] Implement property storage
-- [ ] Implement prototype chain
-- [ ] Implement property descriptors
-- [ ] Write object system tests
-
-**Learning Goals**: JavaScript object model, prototypes
-
----
-
-### Step 6.3: Interpreter Loop - Basics
-**Commit**: `step-6.3-interpreter-basic`  
-**Doc**: `docs/34-interpreter-loop.md`
+### Step 6.2: Interpreter Loop - Basics
+**Commit**: `step-6.2-interpreter-basic`  
+**Doc**: `docs/26-interpreter-loop.md`
 
 - [ ] Create `Interpreter` class
 - [ ] Implement basic stack operations
