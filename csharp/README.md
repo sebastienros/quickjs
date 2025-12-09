@@ -55,7 +55,7 @@ Use `#if` directives when needed:
 
 **Total Tests: 3634** (all passing, 0 skipped)
 
-**Latest Commit**: `step-6.3-variables-properties`
+**Latest Commit**: `step-6.4-interpreter-control`
 
 # Detailed Implementation Plan
 
@@ -838,9 +838,9 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ### Current Status
 
-**Current Step**: Step 1.1 Complete  
-**Last Commit**: `step-1.1-create-solution`  
-**Next Step**: `step-1.2-jsvalue-type`
+**Current Step**: Step 6.3 Complete  
+**Last Commit**: `step-6.4-interpreter-control`  
+**Next Step**: `step-6.5-interpreter-calls`
 
 ### Step Completion Log
 
@@ -852,11 +852,11 @@ Each completed step should be recorded here with its commit hash:
 
 ### Phase Completion
 
-- [ ] **Phase 1**: Project Setup & Core Types (5 steps)
-- [ ] **Phase 2**: Lexer/Tokenizer (9 steps)
-- [ ] **Phase 3**: AST Definitions (4 steps)
-- [ ] **Phase 4**: Parser (9 steps)
-- [ ] **Phase 5**: Bytecode Compiler (7 steps)
+- [x] **Phase 1**: Project Setup & Core Types (5 steps)
+- [x] **Phase 2**: Lexer/Tokenizer (2 steps)
+- [x] **Phase 3**: Bytecode & VM (5 steps)
+- [x] **Phase 4**: Parser & Compiler (8 steps)
+- [x] **Phase 5**: Runtime Objects (4 steps)
 - [ ] **Phase 6**: Runtime & Interpreter (8 steps)
 - [ ] **Phase 7**: Built-in Objects (13 steps)
 - [ ] **Phase 8**: Standard Library (3 steps)
@@ -875,19 +875,31 @@ As each step is completed, documentation files will be added to the `docs/` fold
 |-----|-------|---------------|
 | `01-project-setup.md` | Project Setup | 1.1 |
 | `02-value-types.md` | JavaScript Value Types | 1.2, 1.3 |
-| `03-atoms-and-interning.md` | Atoms and String Interning | 1.4 |
-| `04-error-handling.md` | Error Handling | 1.5 |
-| `05-lexical-analysis.md` | Lexical Analysis | 2.1, 2.2 |
-| `06-numeric-literals.md` | Numeric Literals | 2.3 |
-| `07-string-literals.md` | String Literals | 2.4 |
-| `08-template-literals.md` | Template Literals | 2.5 |
-| `09-operators.md` | Operators and Punctuators | 2.6 |
-| `10-comments-whitespace.md` | Comments and Whitespace | 2.7 |
-| `11-regex-literals.md` | Regex Literals | 2.8 |
-| `12-automatic-semicolon-insertion.md` | Automatic Semicolon Insertion | 2.9 |
-| `13-abstract-syntax-tree.md` | Abstract Syntax Tree | 3.1, 3.2 |
-| `14-declarations.md` | Declarations | 3.3 |
-| `15-destructuring.md` | Destructuring Patterns | 3.4 |
+| `04-atom-table.md` | Atoms and String Interning | 1.4 |
+| `05-exception-hierarchy.md` | Error Handling | 1.5 |
+| `06-token-definitions.md` | Token Definitions | 2.1 |
+| `07-lexer-implementation.md` | Lexer Implementation | 2.2 |
+| `08-opcode-definitions.md` | Bytecode OpCodes | 3.1 |
+| `09-bytecode-buffer.md` | Bytecode Buffer | 3.2 |
+| `10-constant-pool.md` | Constant Pool | 3.3 |
+| `11-function-definition.md` | Function Definition | 3.4 |
+| `12-line-number-table.md` | Line Number Table | 3.5 |
+| `13-parser.md` | Expression Parser | 4.1 |
+| `14-statement-parser.md` | Statement Parser | 4.2 |
+| `15-function-parser.md` | Function Parser | 4.3 |
+| `16-complete-expression-parser.md` | Complete Expression Parser | 4.4 |
+| `17-class-parser.md` | Class Parser | 4.5 |
+| `18-module-parser.md` | Module Parser | 4.6 |
+| `19-destructuring-parser.md` | Destructuring Parser | 4.7 |
+| `20-error-recovery.md` | Parser Error Recovery | 4.8 |
+| `21-jsobject.md` | JSObject | 5.1 |
+| `22-prototype-chain.md` | Prototype Chain | 5.2 |
+| `23-jsfunction.md` | JSFunction Runtime | 5.3 |
+| `24-array-object.md` | Array Object | 5.4 |
+| `25-runtime-architecture.md` | Runtime Architecture | 6.1 |
+| `26-interpreter-loop.md` | Interpreter Loop Basics | 6.2 |
+| `27-variables-properties.md` | Variables and Properties | 6.3 |
+| `28-interpreter-control-flow.md` | Control Flow | 6.4 |
 | *...more as implementation progresses* | | |
 
 ---
