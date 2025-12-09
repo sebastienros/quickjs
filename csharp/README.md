@@ -52,11 +52,11 @@ Use `#if` directives when needed:
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
 | Phase 5: Runtime Objects | ✅ Complete | 4/4 | ~500 |
 | Phase 6: VM & Interpreter | ✅ Complete | 7/7 | ~704 |
-| Phase 7: Built-in Objects | 🔄 In Progress | 10/13 | ~889 |
+| Phase 7: Built-in Objects | 🔄 In Progress | 11/13 | ~937 |
 
-**Total Tests: 1978** (all passing, 0 skipped)
+**Total Tests: 2026** (all passing, 0 skipped)
 
-**Latest Commit**: `step-7.10-typed-arrays`
+**Latest Commit**: `step-7.11-date`
 
 # Detailed Implementation Plan
 
@@ -675,13 +675,13 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 7.11: Date
+### Step 7.11: Date ✅
 **Commit**: `step-7.11-date`  
 **Doc**: `docs/50-date.md`
 
-- [ ] Implement Date constructor
-- [ ] Implement Date methods
-- [ ] Write date tests
+- [x] Implement Date constructor
+- [x] Implement Date methods
+- [x] Write date tests
 
 ---
 

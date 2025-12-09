@@ -643,6 +643,7 @@ public sealed class JSContext : IDisposable
         InitializePromise();
         InitializeCollections();
         InitializeTypedArrays();
+        InitializeDate();
     }
 
     private void InitializeObjectConstructor()
@@ -3753,6 +3754,509 @@ public sealed class JSContext : IDisposable
 
             _globalObject.Set(name, JSValue.FromObject(ctor));
         }
+    }
+
+    private void InitializeDate()
+    {
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+
+        // Create Date.prototype
+        var dateProto = new JSObject(objectProto, JSClassId.Date);
+        _classPrototypes[(int)JSClassId.Date] = dateProto;
+
+        // Date constructor
+        JSValue DateCtor(JSValue thisVal, JSValue[] args)
+        {
+            // new Date() - current time
+            if (args.Length == 0)
+            {
+                var date = new JSDate();
+                date.SetPrototype(dateProto);
+                return JSValue.FromObject(date);
+            }
+
+            // new Date(value) - parse or time value
+            if (args.Length == 1)
+            {
+                var arg = args[0];
+                
+                // Date string
+                if (arg.IsString)
+                {
+                    var timeValue = JSDate.Parse(JSValueConversion.ToString(arg));
+                    var date = new JSDate(timeValue);
+                    date.SetPrototype(dateProto);
+                    return JSValue.FromObject(date);
+                }
+                
+                // Time value in milliseconds
+                if (arg.IsNumber)
+                {
+                    var date = new JSDate(arg.IsInt ? arg.ToInt32() : arg.ToDouble());
+                    date.SetPrototype(dateProto);
+                    return JSValue.FromObject(date);
+                }
+
+                // Another Date object
+                if (arg.IsObject && arg.AsObject() is JSDate srcDate)
+                {
+                    var date = new JSDate(srcDate.TimeValue);
+                    date.SetPrototype(dateProto);
+                    return JSValue.FromObject(date);
+                }
+
+                return JSValue.FromObject(new JSDate(double.NaN));
+            }
+
+            // new Date(year, monthIndex [, day [, hours [, minutes [, seconds [, milliseconds]]]]])
+            var year = JSValueConversion.ToInt32(args[0]);
+            var month = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : 0;
+            var day = args.Length > 2 ? JSValueConversion.ToInt32(args[2]) : 1;
+            var hours = args.Length > 3 ? JSValueConversion.ToInt32(args[3]) : 0;
+            var minutes = args.Length > 4 ? JSValueConversion.ToInt32(args[4]) : 0;
+            var seconds = args.Length > 5 ? JSValueConversion.ToInt32(args[5]) : 0;
+            var milliseconds = args.Length > 6 ? JSValueConversion.ToInt32(args[6]) : 0;
+
+            var dateObj = new JSDate(year, month, day, hours, minutes, seconds, milliseconds);
+            dateObj.SetPrototype(dateProto);
+            return JSValue.FromObject(dateObj);
+        }
+
+        var dateCtor = new JSFunction(DateCtor, "Date", 7, functionProto);
+        dateCtor.SetPrototype(functionProto);
+
+        // Date.now()
+        JSValue DateNow(JSValue thisVal, JSValue[] args)
+        {
+            return JSValue.FromDouble(JSDate.Now());
+        }
+
+        // Date.parse(dateString)
+        JSValue DateParse(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            return JSValue.FromDouble(JSDate.Parse(JSValueConversion.ToString(args[0])));
+        }
+
+        // Date.UTC(year, month [, day [, hours [, minutes [, seconds [, milliseconds]]]]])
+        JSValue DateUTC(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 2) return JSValue.FromDouble(double.NaN);
+            var year = JSValueConversion.ToInt32(args[0]);
+            var month = JSValueConversion.ToInt32(args[1]);
+            var day = args.Length > 2 ? JSValueConversion.ToInt32(args[2]) : 1;
+            var hours = args.Length > 3 ? JSValueConversion.ToInt32(args[3]) : 0;
+            var minutes = args.Length > 4 ? JSValueConversion.ToInt32(args[4]) : 0;
+            var seconds = args.Length > 5 ? JSValueConversion.ToInt32(args[5]) : 0;
+            var milliseconds = args.Length > 6 ? JSValueConversion.ToInt32(args[6]) : 0;
+            return JSValue.FromDouble(JSDate.UTC(year, month, day, hours, minutes, seconds, milliseconds));
+        }
+
+        dateCtor.Set("now", JSValue.FromObject(new JSFunction(DateNow, "now", 0, functionProto)));
+        dateCtor.Set("parse", JSValue.FromObject(new JSFunction(DateParse, "parse", 1, functionProto)));
+        dateCtor.Set("UTC", JSValue.FromObject(new JSFunction(DateUTC, "UTC", 7, functionProto)));
+
+        // Date.prototype methods
+
+        // Getters (local time)
+        JSValue GetFullYear(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getFullYear called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetFullYear());
+        }
+
+        JSValue GetMonth(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getMonth called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetMonth());
+        }
+
+        JSValue GetDate(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getDate called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetDate());
+        }
+
+        JSValue GetDay(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getDay called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetDay());
+        }
+
+        JSValue GetHours(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getHours called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetHours());
+        }
+
+        JSValue GetMinutes(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getMinutes called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetMinutes());
+        }
+
+        JSValue GetSeconds(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getSeconds called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetSeconds());
+        }
+
+        JSValue GetMilliseconds(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getMilliseconds called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetMilliseconds());
+        }
+
+        JSValue GetTime(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getTime called on non-Date");
+            return JSValue.FromDouble(date.GetTime());
+        }
+
+        JSValue GetTimezoneOffset(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getTimezoneOffset called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetTimezoneOffset());
+        }
+
+        // Getters (UTC time)
+        JSValue GetUTCFullYear(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getUTCFullYear called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetUTCFullYear());
+        }
+
+        JSValue GetUTCMonth(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getUTCMonth called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetUTCMonth());
+        }
+
+        JSValue GetUTCDate(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getUTCDate called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetUTCDate());
+        }
+
+        JSValue GetUTCDay(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getUTCDay called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetUTCDay());
+        }
+
+        JSValue GetUTCHours(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getUTCHours called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetUTCHours());
+        }
+
+        JSValue GetUTCMinutes(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getUTCMinutes called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetUTCMinutes());
+        }
+
+        JSValue GetUTCSeconds(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getUTCSeconds called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetUTCSeconds());
+        }
+
+        JSValue GetUTCMilliseconds(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getUTCMilliseconds called on non-Date");
+            return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetUTCMilliseconds());
+        }
+
+        // Setters (local time)
+        JSValue SetFullYear(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setFullYear called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            var year = JSValueConversion.ToInt32(args[0]);
+            int? month = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : (int?)null;
+            int? day = args.Length > 2 ? JSValueConversion.ToInt32(args[2]) : (int?)null;
+            return JSValue.FromDouble(date.SetFullYear(year, month, day));
+        }
+
+        JSValue SetMonth(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setMonth called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            var month = JSValueConversion.ToInt32(args[0]);
+            int? day = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : (int?)null;
+            return JSValue.FromDouble(date.SetMonth(month, day));
+        }
+
+        JSValue SetDate(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setDate called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            return JSValue.FromDouble(date.SetDate(JSValueConversion.ToInt32(args[0])));
+        }
+
+        JSValue SetHours(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setHours called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            var hours = JSValueConversion.ToInt32(args[0]);
+            int? minutes = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : (int?)null;
+            int? seconds = args.Length > 2 ? JSValueConversion.ToInt32(args[2]) : (int?)null;
+            int? milliseconds = args.Length > 3 ? JSValueConversion.ToInt32(args[3]) : (int?)null;
+            return JSValue.FromDouble(date.SetHours(hours, minutes, seconds, milliseconds));
+        }
+
+        JSValue SetMinutes(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setMinutes called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            var minutes = JSValueConversion.ToInt32(args[0]);
+            int? seconds = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : (int?)null;
+            int? milliseconds = args.Length > 2 ? JSValueConversion.ToInt32(args[2]) : (int?)null;
+            return JSValue.FromDouble(date.SetMinutes(minutes, seconds, milliseconds));
+        }
+
+        JSValue SetSeconds(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setSeconds called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            var seconds = JSValueConversion.ToInt32(args[0]);
+            int? milliseconds = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : (int?)null;
+            return JSValue.FromDouble(date.SetSeconds(seconds, milliseconds));
+        }
+
+        JSValue SetMilliseconds(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setMilliseconds called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            return JSValue.FromDouble(date.SetMilliseconds(JSValueConversion.ToInt32(args[0])));
+        }
+
+        JSValue SetTime(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setTime called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            return JSValue.FromDouble(date.SetTime(JSValueConversion.ToNumber(args[0])));
+        }
+
+        // Setters (UTC time)
+        JSValue SetUTCFullYear(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setUTCFullYear called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            var year = JSValueConversion.ToInt32(args[0]);
+            int? month = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : (int?)null;
+            int? day = args.Length > 2 ? JSValueConversion.ToInt32(args[2]) : (int?)null;
+            return JSValue.FromDouble(date.SetUTCFullYear(year, month, day));
+        }
+
+        JSValue SetUTCMonth(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setUTCMonth called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            var month = JSValueConversion.ToInt32(args[0]);
+            int? day = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : (int?)null;
+            return JSValue.FromDouble(date.SetUTCMonth(month, day));
+        }
+
+        JSValue SetUTCDate(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setUTCDate called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            return JSValue.FromDouble(date.SetUTCDate(JSValueConversion.ToInt32(args[0])));
+        }
+
+        JSValue SetUTCHours(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setUTCHours called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            var hours = JSValueConversion.ToInt32(args[0]);
+            int? minutes = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : (int?)null;
+            int? seconds = args.Length > 2 ? JSValueConversion.ToInt32(args[2]) : (int?)null;
+            int? milliseconds = args.Length > 3 ? JSValueConversion.ToInt32(args[3]) : (int?)null;
+            return JSValue.FromDouble(date.SetUTCHours(hours, minutes, seconds, milliseconds));
+        }
+
+        JSValue SetUTCMinutes(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setUTCMinutes called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            var minutes = JSValueConversion.ToInt32(args[0]);
+            int? seconds = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : (int?)null;
+            int? milliseconds = args.Length > 2 ? JSValueConversion.ToInt32(args[2]) : (int?)null;
+            return JSValue.FromDouble(date.SetUTCMinutes(minutes, seconds, milliseconds));
+        }
+
+        JSValue SetUTCSeconds(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setUTCSeconds called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            var seconds = JSValueConversion.ToInt32(args[0]);
+            int? milliseconds = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : (int?)null;
+            return JSValue.FromDouble(date.SetUTCSeconds(seconds, milliseconds));
+        }
+
+        JSValue SetUTCMilliseconds(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.setUTCMilliseconds called on non-Date");
+            if (args.Length == 0) return JSValue.FromDouble(double.NaN);
+            return JSValue.FromDouble(date.SetUTCMilliseconds(JSValueConversion.ToInt32(args[0])));
+        }
+
+        // Conversion methods
+        JSValue ToDateString(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.toDateString called on non-Date");
+            return JSValue.FromString(date.ToDateString());
+        }
+
+        JSValue ToTimeString(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.toTimeString called on non-Date");
+            return JSValue.FromString(date.ToTimeString());
+        }
+
+        JSValue ToISOString(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.toISOString called on non-Date");
+            try
+            {
+                return JSValue.FromString(date.ToISOString());
+            }
+            catch (JSRangeError)
+            {
+                return ThrowRangeError("Invalid time value");
+            }
+        }
+
+        JSValue ToUTCString(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.toUTCString called on non-Date");
+            return JSValue.FromString(date.ToUTCString());
+        }
+
+        JSValue ToJSON(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.toJSON called on non-Date");
+            if (date.IsInvalid)
+                return JSValue.Null;
+            try
+            {
+                return JSValue.FromString(date.ToISOString());
+            }
+            catch
+            {
+                return JSValue.Null;
+            }
+        }
+
+        JSValue DateToString(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.toString called on non-Date");
+            return JSValue.FromString(date.ToString());
+        }
+
+        JSValue ValueOf(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.valueOf called on non-Date");
+            return JSValue.FromDouble(date.ValueOf());
+        }
+
+        // Register prototype methods - Getters (local)
+        dateProto.Set("getFullYear", JSValue.FromObject(new JSFunction(GetFullYear, "getFullYear", 0, functionProto)));
+        dateProto.Set("getMonth", JSValue.FromObject(new JSFunction(GetMonth, "getMonth", 0, functionProto)));
+        dateProto.Set("getDate", JSValue.FromObject(new JSFunction(GetDate, "getDate", 0, functionProto)));
+        dateProto.Set("getDay", JSValue.FromObject(new JSFunction(GetDay, "getDay", 0, functionProto)));
+        dateProto.Set("getHours", JSValue.FromObject(new JSFunction(GetHours, "getHours", 0, functionProto)));
+        dateProto.Set("getMinutes", JSValue.FromObject(new JSFunction(GetMinutes, "getMinutes", 0, functionProto)));
+        dateProto.Set("getSeconds", JSValue.FromObject(new JSFunction(GetSeconds, "getSeconds", 0, functionProto)));
+        dateProto.Set("getMilliseconds", JSValue.FromObject(new JSFunction(GetMilliseconds, "getMilliseconds", 0, functionProto)));
+        dateProto.Set("getTime", JSValue.FromObject(new JSFunction(GetTime, "getTime", 0, functionProto)));
+        dateProto.Set("getTimezoneOffset", JSValue.FromObject(new JSFunction(GetTimezoneOffset, "getTimezoneOffset", 0, functionProto)));
+
+        // Register prototype methods - Getters (UTC)
+        dateProto.Set("getUTCFullYear", JSValue.FromObject(new JSFunction(GetUTCFullYear, "getUTCFullYear", 0, functionProto)));
+        dateProto.Set("getUTCMonth", JSValue.FromObject(new JSFunction(GetUTCMonth, "getUTCMonth", 0, functionProto)));
+        dateProto.Set("getUTCDate", JSValue.FromObject(new JSFunction(GetUTCDate, "getUTCDate", 0, functionProto)));
+        dateProto.Set("getUTCDay", JSValue.FromObject(new JSFunction(GetUTCDay, "getUTCDay", 0, functionProto)));
+        dateProto.Set("getUTCHours", JSValue.FromObject(new JSFunction(GetUTCHours, "getUTCHours", 0, functionProto)));
+        dateProto.Set("getUTCMinutes", JSValue.FromObject(new JSFunction(GetUTCMinutes, "getUTCMinutes", 0, functionProto)));
+        dateProto.Set("getUTCSeconds", JSValue.FromObject(new JSFunction(GetUTCSeconds, "getUTCSeconds", 0, functionProto)));
+        dateProto.Set("getUTCMilliseconds", JSValue.FromObject(new JSFunction(GetUTCMilliseconds, "getUTCMilliseconds", 0, functionProto)));
+
+        // Register prototype methods - Setters (local)
+        dateProto.Set("setFullYear", JSValue.FromObject(new JSFunction(SetFullYear, "setFullYear", 3, functionProto)));
+        dateProto.Set("setMonth", JSValue.FromObject(new JSFunction(SetMonth, "setMonth", 2, functionProto)));
+        dateProto.Set("setDate", JSValue.FromObject(new JSFunction(SetDate, "setDate", 1, functionProto)));
+        dateProto.Set("setHours", JSValue.FromObject(new JSFunction(SetHours, "setHours", 4, functionProto)));
+        dateProto.Set("setMinutes", JSValue.FromObject(new JSFunction(SetMinutes, "setMinutes", 3, functionProto)));
+        dateProto.Set("setSeconds", JSValue.FromObject(new JSFunction(SetSeconds, "setSeconds", 2, functionProto)));
+        dateProto.Set("setMilliseconds", JSValue.FromObject(new JSFunction(SetMilliseconds, "setMilliseconds", 1, functionProto)));
+        dateProto.Set("setTime", JSValue.FromObject(new JSFunction(SetTime, "setTime", 1, functionProto)));
+
+        // Register prototype methods - Setters (UTC)
+        dateProto.Set("setUTCFullYear", JSValue.FromObject(new JSFunction(SetUTCFullYear, "setUTCFullYear", 3, functionProto)));
+        dateProto.Set("setUTCMonth", JSValue.FromObject(new JSFunction(SetUTCMonth, "setUTCMonth", 2, functionProto)));
+        dateProto.Set("setUTCDate", JSValue.FromObject(new JSFunction(SetUTCDate, "setUTCDate", 1, functionProto)));
+        dateProto.Set("setUTCHours", JSValue.FromObject(new JSFunction(SetUTCHours, "setUTCHours", 4, functionProto)));
+        dateProto.Set("setUTCMinutes", JSValue.FromObject(new JSFunction(SetUTCMinutes, "setUTCMinutes", 3, functionProto)));
+        dateProto.Set("setUTCSeconds", JSValue.FromObject(new JSFunction(SetUTCSeconds, "setUTCSeconds", 2, functionProto)));
+        dateProto.Set("setUTCMilliseconds", JSValue.FromObject(new JSFunction(SetUTCMilliseconds, "setUTCMilliseconds", 1, functionProto)));
+
+        // Register prototype methods - Conversion
+        dateProto.Set("toDateString", JSValue.FromObject(new JSFunction(ToDateString, "toDateString", 0, functionProto)));
+        dateProto.Set("toTimeString", JSValue.FromObject(new JSFunction(ToTimeString, "toTimeString", 0, functionProto)));
+        dateProto.Set("toISOString", JSValue.FromObject(new JSFunction(ToISOString, "toISOString", 0, functionProto)));
+        dateProto.Set("toUTCString", JSValue.FromObject(new JSFunction(ToUTCString, "toUTCString", 0, functionProto)));
+        dateProto.Set("toJSON", JSValue.FromObject(new JSFunction(ToJSON, "toJSON", 1, functionProto)));
+        dateProto.Set("toString", JSValue.FromObject(new JSFunction(DateToString, "toString", 0, functionProto)));
+        dateProto.Set("valueOf", JSValue.FromObject(new JSFunction(ValueOf, "valueOf", 0, functionProto)));
+
+        // Also add toGMTString as alias for toUTCString
+        dateProto.Set("toGMTString", JSValue.FromObject(new JSFunction(ToUTCString, "toGMTString", 0, functionProto)));
+
+        _globalObject.Set("Date", JSValue.FromObject(dateCtor));
     }
 
     #endregion
