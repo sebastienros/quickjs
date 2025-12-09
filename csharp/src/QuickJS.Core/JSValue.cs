@@ -144,23 +144,35 @@ public readonly struct JSValue : IEquatable<JSValue>
     /// <returns>A JSValue representing the number.</returns>
     /// <remarks>
     /// If the value can be exactly represented as a 32-bit integer (and fits in Int32 range),
-    /// it will be stored as an integer for efficiency.
+    /// it will be stored as an integer for efficiency. Note: -0 is preserved as a double.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static JSValue FromDouble(double value)
     {
         // Optimization: if the double is actually an integer that fits in int32, store as int
         // This matches QuickJS behavior in JS_NewFloat64
+        // Exception: -0 must be preserved as a double
         if (value >= int.MinValue && value <= int.MaxValue)
         {
             int intVal = (int)value;
-            if ((double)intVal == value)
+            if ((double)intVal == value && !IsNegativeZero(value))
             {
                 return new JSValue(JSValueType.Int, intVal);
             }
         }
 
         return new JSValue(value);
+    }
+
+    /// <summary>
+    /// Checks if a double value is negative zero.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsNegativeZero(double value)
+    {
+        // -0 has bit pattern 0x8000000000000000 (only sign bit set)
+        // We check if value equals zero but has negative infinity when we divide 1 by it
+        return value == 0.0 && 1.0 / value < 0;
     }
 
     /// <summary>
@@ -244,6 +256,24 @@ public readonly struct JSValue : IEquatable<JSValue>
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _tag == JSValueType.Bool;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> if this value is the boolean <c>true</c>.
+    /// </summary>
+    public bool IsTrue
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _tag == JSValueType.Bool && _int64Value != 0;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> if this value is the boolean <c>false</c>.
+    /// </summary>
+    public bool IsFalse
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _tag == JSValueType.Bool && _int64Value == 0;
     }
 
     /// <summary>
