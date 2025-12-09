@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Linq;
 using Xunit;
 
 namespace QuickJS.Tests;
@@ -438,6 +439,251 @@ public class LineNumberTableTests
         var str = table.ToString();
 
         Assert.Contains("count=2", str);
+    }
+
+    #endregion
+
+    #region GetLineColumn
+
+    [Fact]
+    public void GetLineColumn_EmptySource_ReturnsOneOne()
+    {
+        var (line, column) = LineNumberTable.GetLineColumn("", 0);
+        Assert.Equal(1, line);
+        Assert.Equal(1, column);
+    }
+
+    [Fact]
+    public void GetLineColumn_PositionZero_ReturnsOneOne()
+    {
+        var (line, column) = LineNumberTable.GetLineColumn("hello world", 0);
+        Assert.Equal(1, line);
+        Assert.Equal(1, column);
+    }
+
+    [Fact]
+    public void GetLineColumn_MiddleOfLine_ReturnsCorrectColumn()
+    {
+        var (line, column) = LineNumberTable.GetLineColumn("hello world", 6);
+        Assert.Equal(1, line);
+        Assert.Equal(7, column); // "world" starts at column 7
+    }
+
+    [Fact]
+    public void GetLineColumn_AfterNewline_ReturnsNextLine()
+    {
+        var (line, column) = LineNumberTable.GetLineColumn("line1\nline2", 6);
+        Assert.Equal(2, line);
+        Assert.Equal(1, column);
+    }
+
+    [Fact]
+    public void GetLineColumn_MultipleNewlines_CountsCorrectly()
+    {
+        var (line, column) = LineNumberTable.GetLineColumn("a\nb\nc\nd", 6);
+        Assert.Equal(4, line);
+        Assert.Equal(1, column);
+    }
+
+    [Fact]
+    public void GetLineColumn_CRLFNewline_TreatedAsSingle()
+    {
+        var (line, column) = LineNumberTable.GetLineColumn("line1\r\nline2", 7);
+        Assert.Equal(2, line);
+        Assert.Equal(1, column);
+    }
+
+    #endregion
+
+    #region FindLocation
+
+    [Fact]
+    public void FindLocation_EmptyTable_ReturnsBase()
+    {
+        var table = new LineNumberTable
+        {
+            BaseLine = 10,
+            BaseColumn = 5
+        };
+        
+        var loc = table.FindLocation(0, "test");
+        
+        Assert.Equal(0, loc.PC);
+        Assert.Equal(10, loc.Line);
+        Assert.Equal(5, loc.Column);
+    }
+
+    [Fact]
+    public void FindLocation_ValidEntry_ReturnsCorrectLocation()
+    {
+        var table = new LineNumberTable();
+        table.Add(0, 0);    // Line 1
+        table.Add(10, 6);   // After newline = Line 2
+        
+        var loc = table.FindLocation(10, "hello\nworld");
+        
+        Assert.Equal(10, loc.PC);
+        Assert.Equal(2, loc.Line);
+        Assert.Equal(1, loc.Column);
+    }
+
+    #endregion
+
+    #region AdjustPC
+
+    [Fact]
+    public void AdjustPC_ReducesPCAfterPosition()
+    {
+        var table = new LineNumberTable();
+        table.Add(0, 0);
+        table.Add(10, 50);
+        table.Add(20, 100);
+        
+        table.AdjustPC(5, 3); // Remove 3 bytes at position 5
+        
+        Assert.Equal(0, table[0].Pc);   // Before position, unchanged
+        Assert.Equal(7, table[1].Pc);   // 10 - 3 = 7
+        Assert.Equal(17, table[2].Pc);  // 20 - 3 = 17
+    }
+
+    #endregion
+
+    #region Encode/Decode
+
+    [Fact]
+    public void Encode_EmptyTable_ReturnsBaseOnly()
+    {
+        var table = new LineNumberTable
+        {
+            BaseLine = 1,
+            BaseColumn = 1
+        };
+        
+        byte[] encoded = table.Encode("");
+        
+        Assert.Equal(2, encoded.Length); // Just base line and column
+        Assert.Equal(0, encoded[0]); // Line 0 (base 1 - 1)
+        Assert.Equal(0, encoded[1]); // Column 0 (base 1 - 1)
+    }
+
+    [Fact]
+    public void Encode_Decode_Roundtrip_PreservesData()
+    {
+        var source = "line1\nline2\nline3";
+        var table = new LineNumberTable { BaseLine = 1, BaseColumn = 1 };
+        table.Add(0, 0);    // Line 1, Col 1
+        table.Add(5, 6);    // Line 2, Col 1
+        table.Add(10, 12);  // Line 3, Col 1
+        
+        byte[] encoded = table.Encode(source);
+        var decoded = LineNumberTable.Decode(encoded).ToList();
+        
+        Assert.True(decoded.Count >= 3);
+        
+        // First entry is the base
+        Assert.Equal(0, decoded[0].PC);
+        Assert.Equal(1, decoded[0].Line);
+        Assert.Equal(1, decoded[0].Column);
+    }
+
+    [Fact]
+    public void FindInEncoded_ReturnsCorrectLocation()
+    {
+        var source = "let x = 1;\nlet y = 2;\nlet z = 3;";
+        var table = new LineNumberTable { BaseLine = 1, BaseColumn = 1 };
+        table.Add(0, 0);    // Line 1
+        table.Add(10, 11);  // Line 2
+        table.Add(20, 22);  // Line 3
+        
+        byte[] encoded = table.Encode(source);
+        
+        var loc = LineNumberTable.FindInEncoded(encoded, 15);
+        Assert.Equal(2, loc.Line); // Should be in line 2
+    }
+
+    [Fact]
+    public void Decode_EmptyData_ReturnsEmpty()
+    {
+        var decoded = LineNumberTable.Decode(System.Array.Empty<byte>()).ToList();
+        Assert.Empty(decoded);
+    }
+
+    #endregion
+
+    #region PC2LineConstants
+
+    [Fact]
+    public void PC2LineConstants_MatchQuickJS()
+    {
+        // These constants match QuickJS exactly
+        Assert.Equal(-1, PC2LineConstants.Base);
+        Assert.Equal(5, PC2LineConstants.Range);
+        Assert.Equal(1, PC2LineConstants.OpFirst);
+        Assert.Equal(50, PC2LineConstants.DiffPCMax); // (255 - 1) / 5 = 50
+    }
+
+    #endregion
+
+    #region PCSourceLocation
+
+    [Fact]
+    public void PCSourceLocation_ToString_FormatsCorrectly()
+    {
+        var loc = new PCSourceLocation(10, 5, 3);
+        Assert.Equal("PC 10: line 5, col 3", loc.ToString());
+    }
+
+    [Fact]
+    public void PCSourceLocation_Properties_Work()
+    {
+        var loc = new PCSourceLocation(100, 42, 7);
+        Assert.Equal(100, loc.PC);
+        Assert.Equal(42, loc.Line);
+        Assert.Equal(7, loc.Column);
+    }
+
+    #endregion
+
+    #region Compact vs Extended Encoding
+
+    [Fact]
+    public void Encode_SmallDeltas_UsesCompactFormat()
+    {
+        // Line delta of 1 (within -1 to +3 range) and small PC delta
+        var source = "a\nb";
+        var table = new LineNumberTable { BaseLine = 1, BaseColumn = 1 };
+        table.Add(0, 0);  // Line 1
+        table.Add(5, 2);  // Line 2 (delta +1)
+        
+        byte[] encoded = table.Encode(source);
+        
+        // Compact encoding should be small - base (2 bytes) + one entry
+        Assert.True(encoded.Length <= 5);
+    }
+
+    [Fact]
+    public void Encode_LargeLineJump_UsesExtendedFormat()
+    {
+        // Create source with many lines
+        var source = string.Join("\n", Enumerable.Repeat("x", 100));
+        var table = new LineNumberTable { BaseLine = 1, BaseColumn = 1 };
+        table.Add(0, 0);   // Line 1
+        table.Add(10, 99); // Line 50 (large jump, outside -1 to +3)
+        
+        byte[] encoded = table.Encode(source);
+        
+        // Extended format uses 0 prefix byte
+        // Check if there's a 0 byte after the header
+        bool hasZeroPrefix = false;
+        for (int i = 2; i < encoded.Length; i++)
+        {
+            if (encoded[i] == 0)
+            {
+                hasZeroPrefix = true;
+                break;
+            }
+        }
+        Assert.True(hasZeroPrefix);
     }
 
     #endregion
