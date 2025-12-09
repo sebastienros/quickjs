@@ -50,12 +50,12 @@ Use `#if` directives when needed:
 | Phase 2: Lexer | ✅ Complete | 2/2 | ~100 |
 | Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
-| Phase 5: Runtime Objects | 🔄 In Progress | 2/4 | ~360 |
+| Phase 5: Runtime Objects | 🔄 In Progress | 3/4 | ~500 |
 | Phase 6: VM & Interpreter | ⏳ Planned | 0/7 | - |
 
-**Total Tests: 2634** (all passing, 0 skipped)
+**Total Tests: 2778** (all passing, 0 skipped)
 
-**Latest Commit**: `step-5.2-prototypes`
+**Latest Commit**: `step-5.3-jsfunction`
 
 # Detailed Implementation Plan
 
@@ -438,17 +438,18 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 5.3: JSFunction Runtime
+### Step 5.3: JSFunction Runtime ✅
 **Commit**: `step-5.3-jsfunction`  
 **Doc**: `docs/23-jsfunction.md`
 
-- [ ] Create `JSFunction` class wrapping bytecode
-- [ ] Implement function call mechanics
-- [ ] Implement closures (captured variables)
-- [ ] Implement bound functions
-- [ ] Write function runtime tests
+- [x] Create `JSVarRef` class for closure variable references
+- [x] Create `JSFunction` class wrapping bytecode
+- [x] Implement native C# function support (JSCFunction delegate)
+- [x] Implement closures (captured variables)
+- [x] Implement bound functions (Function.prototype.bind)
+- [x] Write function runtime tests (144 new tests)
 
-**Learning Goals**: Function objects, closures
+**Learning Goals**: Function objects, closures, bound functions
 
 ---
 
