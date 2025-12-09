@@ -640,6 +640,7 @@ public sealed class JSContext : IDisposable
         InitializeRegExpConstructor();
         InitializeJSON();
         InitializePromise();
+        InitializeCollections();
     }
 
     private void InitializeObjectConstructor()
@@ -1404,6 +1405,299 @@ public sealed class JSContext : IDisposable
                 next.Set(StateKey, JSValue.FromString(Rejected));
                 next.Set(ResultKey, JSValue.FromString(ex.Message));
             }
+        }
+    }
+
+    private void InitializeCollections()
+    {
+        InitMap();
+        InitSet();
+        InitWeakMap();
+        InitWeakSet();
+
+        void InitMap()
+        {
+            var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+            var objectProto = GetClassPrototype(JSClassId.Object)!;
+            var mapProto = new JSObject(objectProto, JSClassId.Map);
+            SetClassPrototype(JSClassId.Map, mapProto);
+
+            JSValue MapCtor(JSValue thisVal, JSValue[] args)
+            {
+                var mapObj = new JSObject(mapProto, JSClassId.Map)
+                {
+                    HostData = new Dictionary<JSValue, JSValue>(new JSValueComparer())
+                };
+                return JSValue.FromObject(mapObj);
+            }
+
+            var mapCtorFn = new JSFunction(MapCtor, "Map", 0, functionProto);
+            mapCtorFn.Set("prototype", JSValue.FromObject(mapProto));
+            mapProto.Set("constructor", JSValue.FromObject(mapCtorFn));
+
+            JSValue MapSet(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Map)
+                    return ThrowTypeError("Map.prototype.set called on non-Map");
+                var map = (Dictionary<JSValue, JSValue>)thisVal.AsObject().HostData!;
+                var key = args.Length > 0 ? args[0] : JSValue.Undefined;
+                var value = args.Length > 1 ? args[1] : JSValue.Undefined;
+                map[key] = value;
+                return thisVal;
+            }
+
+            JSValue MapGet(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Map)
+                    return ThrowTypeError("Map.prototype.get called on non-Map");
+                var map = (Dictionary<JSValue, JSValue>)thisVal.AsObject().HostData!;
+                var key = args.Length > 0 ? args[0] : JSValue.Undefined;
+                return map.TryGetValue(key, out var val) ? val : JSValue.Undefined;
+            }
+
+            JSValue MapHas(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Map)
+                    return ThrowTypeError("Map.prototype.has called on non-Map");
+                var map = (Dictionary<JSValue, JSValue>)thisVal.AsObject().HostData!;
+                var key = args.Length > 0 ? args[0] : JSValue.Undefined;
+                return JSValue.FromBoolean(map.ContainsKey(key));
+            }
+
+            JSValue MapDelete(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Map)
+                    return ThrowTypeError("Map.prototype.delete called on non-Map");
+                var map = (Dictionary<JSValue, JSValue>)thisVal.AsObject().HostData!;
+                var key = args.Length > 0 ? args[0] : JSValue.Undefined;
+                var removed = map.Remove(key);
+                return JSValue.FromBoolean(removed);
+            }
+
+            JSValue MapClear(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Map)
+                    return ThrowTypeError("Map.prototype.clear called on non-Map");
+                var map = (Dictionary<JSValue, JSValue>)thisVal.AsObject().HostData!;
+                map.Clear();
+                return JSValue.Undefined;
+            }
+
+            JSValue MapSize(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Map)
+                    return ThrowTypeError("Map.prototype.size getter called on non-Map");
+                var map = (Dictionary<JSValue, JSValue>)thisVal.AsObject().HostData!;
+                return JSValue.FromInt32(map.Count);
+            }
+
+            mapProto.Set("set", JSValue.FromObject(new JSFunction(MapSet, "set", 2, functionProto)));
+            mapProto.Set("get", JSValue.FromObject(new JSFunction(MapGet, "get", 1, functionProto)));
+            mapProto.Set("has", JSValue.FromObject(new JSFunction(MapHas, "has", 1, functionProto)));
+            mapProto.Set("delete", JSValue.FromObject(new JSFunction(MapDelete, "delete", 1, functionProto)));
+            mapProto.Set("clear", JSValue.FromObject(new JSFunction(MapClear, "clear", 0, functionProto)));
+            mapProto.Set("size", JSValue.FromObject(new JSFunction(MapSize, "size", 0, functionProto)));
+
+            _globalObject.Set("Map", JSValue.FromObject(mapCtorFn));
+        }
+
+        void InitSet()
+        {
+            var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+            var objectProto = GetClassPrototype(JSClassId.Object)!;
+            var setProto = new JSObject(objectProto, JSClassId.Set);
+            SetClassPrototype(JSClassId.Set, setProto);
+
+            JSValue SetCtor(JSValue thisVal, JSValue[] args)
+            {
+                var obj = new JSObject(setProto, JSClassId.Set)
+                {
+                    HostData = new HashSet<JSValue>(new JSValueComparer())
+                };
+                return JSValue.FromObject(obj);
+            }
+
+            var setCtorFn = new JSFunction(SetCtor, "Set", 0, functionProto);
+            setCtorFn.Set("prototype", JSValue.FromObject(setProto));
+            setProto.Set("constructor", JSValue.FromObject(setCtorFn));
+
+            JSValue SetAdd(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Set)
+                    return ThrowTypeError("Set.prototype.add called on non-Set");
+                var set = (HashSet<JSValue>)thisVal.AsObject().HostData!;
+                var val = args.Length > 0 ? args[0] : JSValue.Undefined;
+                set.Add(val);
+                return thisVal;
+            }
+
+            JSValue SetHas(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Set)
+                    return ThrowTypeError("Set.prototype.has called on non-Set");
+                var set = (HashSet<JSValue>)thisVal.AsObject().HostData!;
+                var val = args.Length > 0 ? args[0] : JSValue.Undefined;
+                return JSValue.FromBoolean(set.Contains(val));
+            }
+
+            JSValue SetDelete(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Set)
+                    return ThrowTypeError("Set.prototype.delete called on non-Set");
+                var set = (HashSet<JSValue>)thisVal.AsObject().HostData!;
+                var val = args.Length > 0 ? args[0] : JSValue.Undefined;
+                return JSValue.FromBoolean(set.Remove(val));
+            }
+
+            JSValue SetClear(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Set)
+                    return ThrowTypeError("Set.prototype.clear called on non-Set");
+                var set = (HashSet<JSValue>)thisVal.AsObject().HostData!;
+                set.Clear();
+                return JSValue.Undefined;
+            }
+
+            JSValue SetSize(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Set)
+                    return ThrowTypeError("Set.prototype.size getter called on non-Set");
+                var set = (HashSet<JSValue>)thisVal.AsObject().HostData!;
+                return JSValue.FromInt32(set.Count);
+            }
+
+            setProto.Set("add", JSValue.FromObject(new JSFunction(SetAdd, "add", 1, functionProto)));
+            setProto.Set("has", JSValue.FromObject(new JSFunction(SetHas, "has", 1, functionProto)));
+            setProto.Set("delete", JSValue.FromObject(new JSFunction(SetDelete, "delete", 1, functionProto)));
+            setProto.Set("clear", JSValue.FromObject(new JSFunction(SetClear, "clear", 0, functionProto)));
+            setProto.Set("size", JSValue.FromObject(new JSFunction(SetSize, "size", 0, functionProto)));
+
+            _globalObject.Set("Set", JSValue.FromObject(setCtorFn));
+        }
+
+        void InitWeakMap()
+        {
+            var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+            var objectProto = GetClassPrototype(JSClassId.Object)!;
+            var weakMapProto = new JSObject(objectProto, JSClassId.WeakMap);
+            SetClassPrototype(JSClassId.WeakMap, weakMapProto);
+
+            JSValue WeakMapCtor(JSValue thisVal, JSValue[] args)
+            {
+                var obj = new JSObject(weakMapProto, JSClassId.WeakMap)
+                {
+                    HostData = new Dictionary<JSValue, JSValue>(new JSValueComparer())
+                };
+                return JSValue.FromObject(obj);
+            }
+
+            var ctor = new JSFunction(WeakMapCtor, "WeakMap", 0, functionProto);
+            ctor.Set("prototype", JSValue.FromObject(weakMapProto));
+            weakMapProto.Set("constructor", JSValue.FromObject(ctor));
+
+            JSValue WeakMapSet(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.WeakMap)
+                    return ThrowTypeError("WeakMap.prototype.set called on non-WeakMap");
+                var dict = (Dictionary<JSValue, JSValue>)thisVal.AsObject().HostData!;
+                var key = args.Length > 0 ? args[0] : JSValue.Undefined;
+                if (!key.IsObject)
+                    return ThrowTypeError("Invalid value used as weak map key");
+                var val = args.Length > 1 ? args[1] : JSValue.Undefined;
+                dict[key] = val;
+                return thisVal;
+            }
+
+            JSValue WeakMapGet(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.WeakMap)
+                    return ThrowTypeError("WeakMap.prototype.get called on non-WeakMap");
+                var dict = (Dictionary<JSValue, JSValue>)thisVal.AsObject().HostData!;
+                var key = args.Length > 0 ? args[0] : JSValue.Undefined;
+                return dict.TryGetValue(key, out var val) ? val : JSValue.Undefined;
+            }
+
+            JSValue WeakMapHas(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.WeakMap)
+                    return ThrowTypeError("WeakMap.prototype.has called on non-WeakMap");
+                var dict = (Dictionary<JSValue, JSValue>)thisVal.AsObject().HostData!;
+                var key = args.Length > 0 ? args[0] : JSValue.Undefined;
+                return JSValue.FromBoolean(dict.ContainsKey(key));
+            }
+
+            JSValue WeakMapDelete(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.WeakMap)
+                    return ThrowTypeError("WeakMap.prototype.delete called on non-WeakMap");
+                var dict = (Dictionary<JSValue, JSValue>)thisVal.AsObject().HostData!;
+                var key = args.Length > 0 ? args[0] : JSValue.Undefined;
+                return JSValue.FromBoolean(dict.Remove(key));
+            }
+
+            weakMapProto.Set("set", JSValue.FromObject(new JSFunction(WeakMapSet, "set", 2, functionProto)));
+            weakMapProto.Set("get", JSValue.FromObject(new JSFunction(WeakMapGet, "get", 1, functionProto)));
+            weakMapProto.Set("has", JSValue.FromObject(new JSFunction(WeakMapHas, "has", 1, functionProto)));
+            weakMapProto.Set("delete", JSValue.FromObject(new JSFunction(WeakMapDelete, "delete", 1, functionProto)));
+
+            _globalObject.Set("WeakMap", JSValue.FromObject(ctor));
+        }
+
+        void InitWeakSet()
+        {
+            var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+            var objectProto = GetClassPrototype(JSClassId.Object)!;
+            var weakSetProto = new JSObject(objectProto, JSClassId.WeakSet);
+            SetClassPrototype(JSClassId.WeakSet, weakSetProto);
+
+            JSValue WeakSetCtor(JSValue thisVal, JSValue[] args)
+            {
+                var obj = new JSObject(weakSetProto, JSClassId.WeakSet)
+                {
+                    HostData = new HashSet<JSValue>(new JSValueComparer())
+                };
+                return JSValue.FromObject(obj);
+            }
+
+            var ctor = new JSFunction(WeakSetCtor, "WeakSet", 0, functionProto);
+            ctor.Set("prototype", JSValue.FromObject(weakSetProto));
+            weakSetProto.Set("constructor", JSValue.FromObject(ctor));
+
+            JSValue WeakSetAdd(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.WeakSet)
+                    return ThrowTypeError("WeakSet.prototype.add called on non-WeakSet");
+                var set = (HashSet<JSValue>)thisVal.AsObject().HostData!;
+                var val = args.Length > 0 ? args[0] : JSValue.Undefined;
+                if (!val.IsObject)
+                    return ThrowTypeError("Invalid value used in weak set");
+                set.Add(val);
+                return thisVal;
+            }
+
+            JSValue WeakSetHas(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.WeakSet)
+                    return ThrowTypeError("WeakSet.prototype.has called on non-WeakSet");
+                var set = (HashSet<JSValue>)thisVal.AsObject().HostData!;
+                var val = args.Length > 0 ? args[0] : JSValue.Undefined;
+                return JSValue.FromBoolean(set.Contains(val));
+            }
+
+            JSValue WeakSetDelete(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.WeakSet)
+                    return ThrowTypeError("WeakSet.prototype.delete called on non-WeakSet");
+                var set = (HashSet<JSValue>)thisVal.AsObject().HostData!;
+                var val = args.Length > 0 ? args[0] : JSValue.Undefined;
+                return JSValue.FromBoolean(set.Remove(val));
+            }
+
+            weakSetProto.Set("add", JSValue.FromObject(new JSFunction(WeakSetAdd, "add", 1, functionProto)));
+            weakSetProto.Set("has", JSValue.FromObject(new JSFunction(WeakSetHas, "has", 1, functionProto)));
+            weakSetProto.Set("delete", JSValue.FromObject(new JSFunction(WeakSetDelete, "delete", 1, functionProto)));
+
+            _globalObject.Set("WeakSet", JSValue.FromObject(ctor));
         }
     }
 
