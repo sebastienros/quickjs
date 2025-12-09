@@ -79,8 +79,11 @@ public sealed class JSContext : IDisposable
     // Class prototypes indexed by class ID
     private readonly JSObject?[] _classPrototypes;
 
-    // Loaded modules
+    // Loaded modules (legacy placeholder)
     private readonly Dictionary<string, JSModuleDef> _loadedModules;
+
+    // Module loader
+    private JSModuleLoader? _moduleLoader;
 
     // Random state for Math.random()
     private ulong _randomState;
@@ -196,6 +199,21 @@ public sealed class JSContext : IDisposable
     /// Gets the current call frame.
     /// </summary>
     internal JSCallFrame? CurrentCallFrame => _currentStackFrame;
+
+    /// <summary>
+    /// Gets the module loader for this context.
+    /// </summary>
+    public JSModuleLoader ModuleLoader
+    {
+        get
+        {
+            if (_moduleLoader == null)
+            {
+                _moduleLoader = new JSModuleLoader(this);
+            }
+            return _moduleLoader;
+        }
+    }
 
     #endregion
 
