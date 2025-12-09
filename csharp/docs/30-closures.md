@@ -67,6 +67,15 @@ OP_return
 - Interpreter opcodes: `OP_make_var_ref`, `OP_get_var_ref_value`, `OP_put_var_ref_value`, `OP_close_var_ref`, `OP_closure`
 - Frame closing: `close_var_refs` invoked when popping frames
 
+## C# vs QuickJS Mapping
+
+| Concept | QuickJS (C) | C# Implementation |
+|---------|-------------|-------------------|
+| VarRef allocation | `OP_make_var_ref` pushes (varref, value) | `MakeVarRef/MakeVarRefRef` create `JSVarRef`, push varref & current value |
+| Closure creation | `OP_fclosure` | `FClosure/FClosure8` create `JSFunction` via `JSFunction.CreateFromDef` with outer var refs |
+| Upvalue access | `OP_get_var_ref_value` etc. | `GetVarRef*`/`PutVarRef*` use `JSVarRef.Value` |
+| Closing | `close_var_refs(sf)` | `DetachVarRefs` on function return |
+
 ## Tests to Add (when implementing)
 
 - Simple closure reading a captured `let`/`const`

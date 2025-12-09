@@ -320,6 +320,19 @@ public sealed class JSFunctionDef
     /// Gets the list of argument definitions.
     /// </summary>
     public List<JSVarDef> Args { get; } = new List<JSVarDef>();
+    /// <summary>
+    /// Finds the index of a variable by name atom.
+    /// </summary>
+    public int FindVarIndex(string name)
+    {
+        for (int i = 0; i < Vars.Count; i++)
+        {
+            if (Vars[i].Name.ToString() == name)
+                return i;
+        }
+        return -1;
+    }
+
 
     /// <summary>
     /// Gets the number of arguments.

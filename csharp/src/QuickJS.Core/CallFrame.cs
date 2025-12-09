@@ -39,7 +39,7 @@ public sealed class CallFrame
     private readonly int _actualArgCount;
 
     /// <summary>Closure variable references.</summary>
-    private readonly JSVarRef[] _varRefs;
+    private JSVarRef[] _varRefs;
 
     /// <summary>The 'this' value for this call.</summary>
     private JSValue _thisValue;
@@ -112,7 +112,18 @@ public sealed class CallFrame
         }
 
         // Initialize var refs
-        _varRefs = varRefs ?? Array.Empty<JSVarRef>();
+        if (varRefs != null)
+        {
+            _varRefs = varRefs;
+        }
+        else if (function?.VarRefCount > 0)
+        {
+            _varRefs = new JSVarRef[function.VarRefCount];
+        }
+        else
+        {
+            _varRefs = Array.Empty<JSVarRef>();
+        }
     }
 
     /// <summary>
@@ -216,6 +227,33 @@ public sealed class CallFrame
     /// Gets the number of var refs.
     /// </summary>
     public int VarRefCount => _varRefs.Length;
+
+    /// <summary>
+    /// Gets the array of var refs for this frame.
+    /// </summary>
+    public JSVarRef[] VarRefs => _varRefs;
+
+    /// <summary>
+    /// Adds a var ref to the frame, returning its index.
+    /// </summary>
+    internal int AddVarRef(JSVarRef varRef)
+    {
+        for (int i = 0; i < _varRefs.Length; i++)
+        {
+            if (_varRefs[i] == null)
+            {
+                _varRefs[i] = varRef;
+                return i;
+            }
+        }
+
+        // Resize
+        var newArr = new JSVarRef[_varRefs.Length + 1];
+        Array.Copy(_varRefs, newArr, _varRefs.Length);
+        newArr[^1] = varRef;
+        _varRefs = newArr;
+        return _varRefs.Length - 1;
+    }
 
     /// <summary>
     /// Gets direct access to the locals array for var ref creation.

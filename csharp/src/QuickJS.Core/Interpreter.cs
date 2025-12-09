@@ -143,6 +143,7 @@ public sealed class Interpreter
                 var frame = new CallFrame(fd, thisVal, args, func.VarRefs, savedFrame, actualArgCount: args.Length, functionObject: func);
                 _currentFrame = frame;
                 var result = Execute(fd);
+                DetachVarRefs(frame);
                 if (isConstructor && !result.IsObject)
                     return thisVal;
                 return result;
@@ -155,6 +156,36 @@ public sealed class Interpreter
 
         _context.ThrowTypeError("Not a function");
         return JSValue.Exception;
+    }
+
+    #endregion
+
+    #region Closure Helpers
+
+    private void DetachVarRefs(CallFrame frame)
+    {
+        foreach (var vr in frame.VarRefs)
+        {
+            vr?.Detach();
+        }
+    }
+
+    private void CreateAndPushVarRef(CallFrame frame, JSFunctionDef function, int varIndex)
+    {
+        var vars = function.Vars;
+        bool isLexical = false;
+        bool isConst = false;
+        if (varIndex >= 0 && varIndex < vars.Count)
+        {
+            var vd = vars[varIndex];
+            isLexical = vd.IsLexical;
+            isConst = vd.IsConst;
+        }
+        var vr = new JSVarRef(frame.LocalsArray, varIndex, isLexical, isConst);
+        frame.AddVarRef(vr);
+        var vrObj = new JSVarRefObject(vr);
+        Push(JSValue.FromObject(vrObj));
+        Push(vr.Value);
     }
 
     #endregion
@@ -2214,6 +2245,12 @@ public sealed class Interpreter
                 IsUndefinedOrNull();
                 return true;
 
+            // Reference creation
+            case OpCode.MakeVarRef:
+            case OpCode.MakeVarRefRef:
+                _context.ThrowTypeError($"Unexpected reference opcode in ExecuteOpCode: {opcode}");
+                return false;
+
             // Array element access (no operands)
             case OpCode.GetArrayEl:
                 GetArrayEl();
@@ -2278,7 +2315,7 @@ public sealed class Interpreter
                                        (bytecode[pc + 2] << 16) |
                                        (bytecode[pc + 3] << 24);
                         pc += 4;
-                        if (constIdx < 0 || constIdx >= function.Constants.Count)
+                        if (constIdx < 0 || constIdx >= function!.Constants.Count)
                         {
                             _context.ThrowError(JSErrorType.RangeError, "Invalid constant index");
                             return JSValue.Exception;
@@ -2300,23 +2337,25 @@ public sealed class Interpreter
                         {
                             case SpecialObjectType.Arguments:
                             case SpecialObjectType.MappedArguments:
-                                if (_currentFrame == null)
+                                var cf = _currentFrame;
+                                if (cf == null)
                                 {
                                     Push(JSValue.Undefined);
                                     break;
                                 }
-                                var calleeObj = _currentFrame.FunctionObject;
+                                var calleeObj = cf.FunctionObject;
                                 if (calleeObj == null)
                                 {
                                     Push(JSValue.Undefined);
                                     break;
                                 }
                                 bool mapped = type == SpecialObjectType.MappedArguments;
-                                var argsObj = new JSArgumentsObject(_currentFrame, calleeObj, mapped);
+                                var argsObj = new JSArgumentsObject(cf, calleeObj, mapped);
                                 Push(JSValue.FromObject(argsObj));
                                 break;
                             case SpecialObjectType.ThisFunction:
-                                Push(_currentFrame?.FunctionObject != null ? JSValue.FromObject(_currentFrame.FunctionObject) : JSValue.Undefined);
+                                var cf2 = _currentFrame;
+                                Push(cf2?.FunctionObject != null ? JSValue.FromObject(cf2.FunctionObject) : JSValue.Undefined);
                                 break;
                             case SpecialObjectType.NewTarget:
                             case SpecialObjectType.HomeObject:
@@ -2341,6 +2380,61 @@ public sealed class Interpreter
                              (bytecode[pc + 3] << 24);
                     pc += 4;
                     PushI32(i32);
+                    break;
+
+                case OpCode.MakeVarRef:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        uint atom = (uint)(bytecode[pc] |
+                                          (bytecode[pc + 1] << 8) |
+                                          (bytecode[pc + 2] << 16) |
+                                          (bytecode[pc + 3] << 24));
+                        pc += 4;
+                        if (_currentFrame == null || function == null)
+                        {
+                            Push(JSValue.Undefined);
+                            Push(JSValue.Undefined);
+                            break;
+                        }
+                        string name = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        int varIndex = function.FindVarIndex(name);
+                        if (varIndex < 0)
+                        {
+                            _context.ThrowReferenceError($"Unknown variable {name}");
+                            Push(JSValue.Undefined);
+                            Push(JSValue.Undefined);
+                            break;
+                        }
+                        CreateAndPushVarRef(_currentFrame, function, varIndex);
+                    }
+                    break;
+
+                case OpCode.MakeVarRefRef:
+                    {
+                        if (pc + 6 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        uint atom = (uint)(bytecode[pc] |
+                                          (bytecode[pc + 1] << 8) |
+                                          (bytecode[pc + 2] << 16) |
+                                          (bytecode[pc + 3] << 24));
+                        pc += 4;
+                        int varIndex = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        if (_currentFrame == null || function == null)
+                        {
+                            Push(JSValue.Undefined);
+                            Push(JSValue.Undefined);
+                            break;
+                        }
+                        CreateAndPushVarRef(_currentFrame, function, varIndex);
+                    }
                     break;
 
                 // Local variable access (u16 index)

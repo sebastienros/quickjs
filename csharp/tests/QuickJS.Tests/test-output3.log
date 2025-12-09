@@ -1,0 +1,9 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  QuickJS.Core -> /Users/sebastienros/github/quickjs/csharp/src/QuickJS.Core/bin/Debug/net10.0/QuickJS.Core.dll
+/Users/sebastienros/github/quickjs/csharp/tests/QuickJS.Tests/InterpreterClosureTests.cs(45,65): error CS1503: Argument 1: cannot convert from 'QuickJS.JSFunctionDef' to 'QuickJS.JSObject' [/Users/sebastienros/github/quickjs/csharp/tests/QuickJS.Tests/QuickJS.Tests.csproj::TargetFramework=net10.0]
+/Users/sebastienros/github/quickjs/csharp/tests/QuickJS.Tests/InterpreterClosureTests.cs(97,65): error CS1503: Argument 1: cannot convert from 'QuickJS.JSFunctionDef' to 'QuickJS.JSObject' [/Users/sebastienros/github/quickjs/csharp/tests/QuickJS.Tests/QuickJS.Tests.csproj::TargetFramework=net10.0]
+  QuickJS.Core -> /Users/sebastienros/github/quickjs/csharp/src/QuickJS.Core/bin/Debug/net8.0/QuickJS.Core.dll
+/Users/sebastienros/github/quickjs/csharp/tests/QuickJS.Tests/InterpreterClosureTests.cs(45,65): error CS1503: Argument 1: cannot convert from 'QuickJS.JSFunctionDef' to 'QuickJS.JSObject' [/Users/sebastienros/github/quickjs/csharp/tests/QuickJS.Tests/QuickJS.Tests.csproj::TargetFramework=net8.0]
+/Users/sebastienros/github/quickjs/csharp/tests/QuickJS.Tests/InterpreterClosureTests.cs(97,65): error CS1503: Argument 1: cannot convert from 'QuickJS.JSFunctionDef' to 'QuickJS.JSObject' [/Users/sebastienros/github/quickjs/csharp/tests/QuickJS.Tests/QuickJS.Tests.csproj::TargetFramework=net8.0]
+Get projects properties with MSBuild didn't execute properly with exit code: 1.

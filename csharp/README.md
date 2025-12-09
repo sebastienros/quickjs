@@ -51,9 +51,9 @@ Use `#if` directives when needed:
 | Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
 | Phase 5: Runtime Objects | ✅ Complete | 4/4 | ~500 |
-| Phase 6: VM & Interpreter | 🔄 In Progress | 5/7 | ~694 |
+| Phase 6: VM & Interpreter | 🔄 In Progress | 6/7 | ~698 |
 
-**Total Tests: 3650** (all passing, 0 skipped)
+**Total Tests: 3652** (all passing, 0 skipped)
 
 **Latest Commit**: `step-6.5-interpreter-calls`
 
@@ -539,14 +539,14 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 6.6: Interpreter - Closures
+### Step 6.6: Interpreter - Closures ✅
 **Commit**: `step-6.6-interpreter-closures`  
 **Doc**: `docs/30-closures.md`
 
-- [ ] Implement upvalue handling
-- [ ] Implement closure creation
-- [ ] Handle upvalue closing
-- [ ] Write closure tests
+- [x] Implement upvalue handling
+- [x] Implement closure creation
+- [x] Handle upvalue closing
+- [x] Write closure tests
 
 **Learning Goals**: Closure implementation
 
