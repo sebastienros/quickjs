@@ -48,6 +48,7 @@ public sealed class Parser
     private readonly AtomTable _atoms;
     private Token _currentToken;
     private JSFunctionDef _currentFunction;
+    private bool _isModule;
 
     /// <summary>
     /// Creates a new parser.
@@ -55,12 +56,14 @@ public sealed class Parser
     /// <param name="source">The JavaScript source code.</param>
     /// <param name="fileName">The file name for error reporting.</param>
     /// <param name="atoms">The atom table for string interning.</param>
-    public Parser(string source, string fileName, AtomTable atoms)
+    /// <param name="isModule">True if parsing as ES module, false for script mode.</param>
+    public Parser(string source, string fileName, AtomTable atoms, bool isModule = false)
     {
         _lexer = new Lexer(source, fileName);
         _atoms = atoms ?? throw new ArgumentNullException(nameof(atoms));
         _currentToken = _lexer.NextToken();
         _currentFunction = new JSFunctionDef();
+        _isModule = isModule;
     }
 
     /// <summary>
@@ -1916,6 +1919,446 @@ public sealed class Parser
         EmitOp(OpCode.Drop); // discard result
     }
 
+    // ========================
+    // Module Parsing (ES Modules)
+    // ========================
+
+    /// <summary>
+    /// Parses an import declaration.
+    /// Follows QuickJS js_parse_import implementation.
+    /// </summary>
+    /// <remarks>
+    /// Import forms:
+    /// - import 'module';                       // Side effect import
+    /// - import defaultExport from 'module';    // Default import
+    /// - import { name } from 'module';         // Named import
+    /// - import { name as alias } from 'module'; // Named import with alias
+    /// - import * as ns from 'module';          // Namespace import
+    /// - import defaultExport, { name } from 'module'; // Combined
+    /// </remarks>
+    private void ParseImportDeclaration()
+    {
+        if (!_isModule)
+        {
+            throw new JSSyntaxError(
+                "import declaration is only allowed in module mode",
+                _currentToken.Start);
+        }
+
+        NextToken(); // consume 'import'
+
+        // Check for dynamic import expression: import(expr)
+        if (Check(TokenType.LeftParen))
+        {
+            // This is actually a call expression: import(...)
+            // Restore and parse as expression
+            throw new JSSyntaxError(
+                "Dynamic import must be used as an expression, not a statement",
+                _currentToken.Start);
+        }
+
+        // Check for side-effect-only import: import 'module';
+        if (Check(TokenType.String))
+        {
+            var moduleName = (string)_currentToken.Value!;
+            var moduleAtom = _atoms.GetOrCreateAtom(moduleName);
+            NextToken();
+
+            // Register the module import (no bindings)
+            _currentFunction.AddModuleRequest(moduleAtom);
+
+            ExpectSemicolon();
+            return;
+        }
+
+        // Parse import clause(s)
+        bool hasDefaultImport = false;
+
+        // Check for default import: import defaultExport from 'module'
+        if (Check(TokenType.Identifier))
+        {
+            var localName = (string)_currentToken.Value!;
+            var localAtom = _atoms.GetOrCreateAtom(localName);
+            var defaultAtom = _atoms.GetOrCreateAtom("default");
+            NextToken();
+
+            // Add the import binding
+            _currentFunction.AddImportBinding(localAtom, defaultAtom);
+            hasDefaultImport = true;
+
+            // Check for comma (combined with named imports)
+            if (!Match(TokenType.Comma))
+            {
+                // Just default import, expect 'from'
+                ExpectContextualKeyword("from");
+                ParseFromClause();
+                ExpectSemicolon();
+                return;
+            }
+        }
+
+        // Check for namespace import: import * as ns from 'module'
+        if (Check(TokenType.Asterisk))
+        {
+            NextToken(); // consume '*'
+
+            ExpectContextualKeyword("as");
+
+            if (!Check(TokenType.Identifier))
+            {
+                throw new JSSyntaxError(
+                    "Expected identifier after 'as'",
+                    _currentToken.Start);
+            }
+
+            var localName = (string)_currentToken.Value!;
+            var localAtom = _atoms.GetOrCreateAtom(localName);
+            var starAtom = _atoms.GetOrCreateAtom("*");
+            NextToken();
+
+            // Add namespace import binding
+            _currentFunction.AddImportBinding(localAtom, starAtom);
+
+            ExpectContextualKeyword("from");
+            ParseFromClause();
+            ExpectSemicolon();
+            return;
+        }
+
+        // Parse named imports: import { name, name as alias } from 'module'
+        if (Check(TokenType.LeftBrace))
+        {
+            NextToken(); // consume '{'
+
+            while (!Check(TokenType.RightBrace) && !Check(TokenType.EOF))
+            {
+                JSAtom importName;
+                JSAtom localName;
+
+                // Parse the imported name (can be string or identifier)
+                if (Check(TokenType.String))
+                {
+                    var name = (string)_currentToken.Value!;
+                    importName = _atoms.GetOrCreateAtom(name);
+                    NextToken();
+                }
+                else if (Check(TokenType.Identifier) || IsKeyword(_currentToken.Type))
+                {
+                    var name = GetPropertyName();
+                    importName = _atoms.GetOrCreateAtom(name);
+                    NextToken();
+                }
+                else
+                {
+                    throw new JSSyntaxError(
+                        "Expected identifier or string in import specifier",
+                        _currentToken.Start);
+                }
+
+                // Check for 'as alias'
+                if (CheckContextualKeyword("as"))
+                {
+                    NextToken(); // consume 'as'
+
+                    if (!Check(TokenType.Identifier))
+                    {
+                        throw new JSSyntaxError(
+                            "Expected identifier after 'as'",
+                            _currentToken.Start);
+                    }
+
+                    var alias = (string)_currentToken.Value!;
+                    localName = _atoms.GetOrCreateAtom(alias);
+                    NextToken();
+                }
+                else
+                {
+                    // No alias, local name is same as import name
+                    localName = importName;
+                }
+
+                // Add the import binding
+                _currentFunction.AddImportBinding(localName, importName);
+
+                if (!Match(TokenType.Comma))
+                    break;
+            }
+
+            Expect(TokenType.RightBrace);
+        }
+        else if (!hasDefaultImport)
+        {
+            throw new JSSyntaxError(
+                "Expected import specifier",
+                _currentToken.Start);
+        }
+
+        ExpectContextualKeyword("from");
+        ParseFromClause();
+        ExpectSemicolon();
+    }
+
+    /// <summary>
+    /// Parses the 'from "module"' clause.
+    /// </summary>
+    private void ParseFromClause()
+    {
+        if (!Check(TokenType.String))
+        {
+            throw new JSSyntaxError(
+                "Expected module specifier string",
+                _currentToken.Start);
+        }
+
+        var moduleName = (string)_currentToken.Value!;
+        var moduleAtom = _atoms.GetOrCreateAtom(moduleName);
+        NextToken();
+
+        // Register the module request
+        _currentFunction.AddModuleRequest(moduleAtom);
+    }
+
+    /// <summary>
+    /// Parses an export declaration.
+    /// Follows QuickJS js_parse_export implementation.
+    /// </summary>
+    /// <remarks>
+    /// Export forms:
+    /// - export { name };                    // Named export
+    /// - export { name as alias };           // Named export with alias
+    /// - export var/let/const name = ...;   // Variable export
+    /// - export function name() { }          // Function export
+    /// - export class Name { }               // Class export
+    /// - export default expression;          // Default export
+    /// - export * from 'module';             // Re-export all
+    /// - export { name } from 'module';      // Re-export named
+    /// </remarks>
+    private void ParseExportDeclaration()
+    {
+        if (!_isModule)
+        {
+            throw new JSSyntaxError(
+                "export declaration is only allowed in module mode",
+                _currentToken.Start);
+        }
+
+        NextToken(); // consume 'export'
+
+        // export class Name { }
+        if (Check(TokenType.Class))
+        {
+            ParseClassDeclaration();
+            // The class name is automatically exported
+            return;
+        }
+
+        // export function name() { } or export async function name() { }
+        if (Check(TokenType.Function) ||
+            (Check(TokenType.Async) && PeekToken(true) == TokenType.Function))
+        {
+            if (Check(TokenType.Async))
+                ParseAsyncFunctionDeclaration();
+            else
+                ParseFunctionDeclaration();
+            return;
+        }
+
+        // export var/let/const
+        if (Check(TokenType.Var) || Check(TokenType.Let) || Check(TokenType.Const))
+        {
+            ParseStatement();
+            return;
+        }
+
+        // export default
+        if (Check(TokenType.Default))
+        {
+            NextToken(); // consume 'default'
+
+            // export default class { } or export default class Name { }
+            if (Check(TokenType.Class))
+            {
+                ParseClassExpression();
+                var defaultAtom = _atoms.GetOrCreateAtom("default");
+                _currentFunction.AddExportEntry(defaultAtom, defaultAtom);
+                ExpectSemicolon();
+                return;
+            }
+
+            // export default function() { } or export default function name() { }
+            if (Check(TokenType.Function) ||
+                (Check(TokenType.Async) && PeekToken(true) == TokenType.Function))
+            {
+                // Parse as expression (anonymous allowed)
+                ParseFunction(JSParseFunctionType.Expression, JSFunctionKind.Normal, JSAtom.Empty);
+                var defaultAtom = _atoms.GetOrCreateAtom("default");
+                _currentFunction.AddExportEntry(defaultAtom, defaultAtom);
+                ExpectSemicolon();
+                return;
+            }
+
+            // export default expression;
+            ParseAssignExpression();
+            var defAtom = _atoms.GetOrCreateAtom("default");
+            _currentFunction.AddExportEntry(defAtom, defAtom);
+
+            // Store in hidden _default_ variable
+            var hiddenDefault = _atoms.GetOrCreateAtom("_default_");
+            _currentFunction.AddVar(hiddenDefault, JSVarKind.Normal, isConst: false, isLexical: true);
+            EmitOp(OpCode.ScopePutVarInit);
+            EmitAtom(hiddenDefault);
+            EmitU16((ushort)_currentFunction.ScopeLevel);
+
+            ExpectSemicolon();
+            return;
+        }
+
+        // export * from 'module'
+        if (Check(TokenType.Asterisk))
+        {
+            NextToken(); // consume '*'
+
+            // Check for 'as ns' (export * as ns from 'module')
+            if (CheckContextualKeyword("as"))
+            {
+                NextToken(); // consume 'as'
+
+                if (!Check(TokenType.Identifier))
+                {
+                    throw new JSSyntaxError(
+                        "Expected identifier after 'as'",
+                        _currentToken.Start);
+                }
+
+                var exportName = (string)_currentToken.Value!;
+                var exportAtom = _atoms.GetOrCreateAtom(exportName);
+                var starAtom = _atoms.GetOrCreateAtom("*");
+                NextToken();
+
+                ExpectContextualKeyword("from");
+                ParseFromClause();
+
+                _currentFunction.AddExportEntry(starAtom, exportAtom);
+            }
+            else
+            {
+                ExpectContextualKeyword("from");
+                ParseFromClause();
+                // Star export - all exports from module are re-exported
+            }
+
+            ExpectSemicolon();
+            return;
+        }
+
+        // export { name, name as alias } [from 'module']
+        if (Check(TokenType.LeftBrace))
+        {
+            NextToken(); // consume '{'
+
+            var exports = new List<(JSAtom localName, JSAtom exportName)>();
+
+            while (!Check(TokenType.RightBrace) && !Check(TokenType.EOF))
+            {
+                JSAtom localName;
+                JSAtom exportName;
+
+                // Parse the local name
+                if (Check(TokenType.Identifier) || IsKeyword(_currentToken.Type))
+                {
+                    var name = GetPropertyName();
+                    localName = _atoms.GetOrCreateAtom(name);
+                    NextToken();
+                }
+                else
+                {
+                    throw new JSSyntaxError(
+                        "Expected identifier in export specifier",
+                        _currentToken.Start);
+                }
+
+                // Check for 'as alias'
+                if (CheckContextualKeyword("as"))
+                {
+                    NextToken(); // consume 'as'
+
+                    if (Check(TokenType.String))
+                    {
+                        var alias = (string)_currentToken.Value!;
+                        exportName = _atoms.GetOrCreateAtom(alias);
+                        NextToken();
+                    }
+                    else if (Check(TokenType.Identifier) || IsKeyword(_currentToken.Type))
+                    {
+                        var alias = GetPropertyName();
+                        exportName = _atoms.GetOrCreateAtom(alias);
+                        NextToken();
+                    }
+                    else
+                    {
+                        throw new JSSyntaxError(
+                            "Expected identifier or string after 'as'",
+                            _currentToken.Start);
+                    }
+                }
+                else
+                {
+                    exportName = localName;
+                }
+
+                exports.Add((localName, exportName));
+
+                if (!Match(TokenType.Comma))
+                    break;
+            }
+
+            Expect(TokenType.RightBrace);
+
+            // Check for re-export: export { name } from 'module'
+            if (CheckContextualKeyword("from"))
+            {
+                NextToken(); // consume 'from'
+                ParseFromClause();
+                // This is a re-export, bindings come from the module
+            }
+
+            // Add all export entries
+            foreach (var (localName, exportName) in exports)
+            {
+                _currentFunction.AddExportEntry(localName, exportName);
+            }
+
+            ExpectSemicolon();
+            return;
+        }
+
+        throw new JSSyntaxError(
+            "Invalid export syntax",
+            _currentToken.Start);
+    }
+
+    /// <summary>
+    /// Checks if the current token is a contextual keyword (identifier with specific name).
+    /// </summary>
+    private bool CheckContextualKeyword(string keyword)
+    {
+        return Check(TokenType.Identifier) && (string)_currentToken.Value! == keyword;
+    }
+
+    /// <summary>
+    /// Expects and consumes a contextual keyword.
+    /// </summary>
+    private void ExpectContextualKeyword(string keyword)
+    {
+        if (!CheckContextualKeyword(keyword))
+        {
+            throw new JSSyntaxError(
+                $"Expected '{keyword}'",
+                _currentToken.Start);
+        }
+        NextToken();
+    }
+
     private void EmitNumberLiteral()
     {
         var value = _currentToken.Value;
@@ -2258,6 +2701,16 @@ public sealed class Parser
             case TokenType.Class:
                 // class declaration
                 ParseClassDeclaration();
+                break;
+
+            case TokenType.Import:
+                // import declaration (module only)
+                ParseImportDeclaration();
+                break;
+
+            case TokenType.Export:
+                // export declaration (module only)
+                ParseExportDeclaration();
                 break;
 
             default:

@@ -561,6 +561,59 @@ public sealed class JSFunctionDef
 
     #endregion
 
+    #region Module Support
+
+    /// <summary>
+    /// Gets the list of module requests (imports from other modules).
+    /// </summary>
+    public List<JSAtom> ModuleRequests { get; } = new List<JSAtom>();
+
+    /// <summary>
+    /// Gets the list of import bindings.
+    /// Each entry is (local name, import name) where import name is the exported name from the module.
+    /// </summary>
+    public List<(JSAtom LocalName, JSAtom ImportName)> ImportBindings { get; } = new List<(JSAtom, JSAtom)>();
+
+    /// <summary>
+    /// Gets the list of export entries.
+    /// Each entry is (local name, export name) where export name is the name exposed to importers.
+    /// </summary>
+    public List<(JSAtom LocalName, JSAtom ExportName)> ExportEntries { get; } = new List<(JSAtom, JSAtom)>();
+
+    /// <summary>
+    /// Adds a module request for the given module specifier.
+    /// </summary>
+    /// <param name="moduleAtom">The module specifier atom.</param>
+    public void AddModuleRequest(JSAtom moduleAtom)
+    {
+        if (!ModuleRequests.Contains(moduleAtom))
+        {
+            ModuleRequests.Add(moduleAtom);
+        }
+    }
+
+    /// <summary>
+    /// Adds an import binding.
+    /// </summary>
+    /// <param name="localName">The local variable name to bind.</param>
+    /// <param name="importName">The name exported from the module.</param>
+    public void AddImportBinding(JSAtom localName, JSAtom importName)
+    {
+        ImportBindings.Add((localName, importName));
+    }
+
+    /// <summary>
+    /// Adds an export entry.
+    /// </summary>
+    /// <param name="localName">The local name being exported.</param>
+    /// <param name="exportName">The exported name (may differ via 'as').</param>
+    public void AddExportEntry(JSAtom localName, JSAtom exportName)
+    {
+        ExportEntries.Add((localName, exportName));
+    }
+
+    #endregion
+
     /// <summary>
     /// Returns a string representation for debugging.
     /// </summary>

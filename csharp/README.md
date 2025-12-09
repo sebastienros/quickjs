@@ -49,13 +49,13 @@ Use `#if` directives when needed:
 | Phase 1: Core Types | ✅ Complete | 5/5 | ~50 |
 | Phase 2: Lexer | ✅ Complete | 2/2 | ~100 |
 | Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
-| Phase 4: Parser | 🔄 In Progress | 5/8 | ~1800 |
+| Phase 4: Parser | 🔄 In Progress | 6/8 | ~1900 |
 | Phase 5: Runtime Objects | ⏳ Planned | 0/4 | - |
 | Phase 6: VM & Interpreter | ⏳ Planned | 0/7 | - |
 
-**Total Tests: 2042** (all passing, 0 skipped)
+**Total Tests: 2110** (all passing, 0 skipped)
 
-**Latest Commit**: `step-4.5-class-parser`
+**Latest Commit**: `step-4.6-module-parser`
 
 # Detailed Implementation Plan
 
@@ -360,14 +360,14 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 4.6: Module Parser
+### Step 4.6: Module Parser ✅
 **Commit**: `step-4.6-module-parser`  
 **Doc**: `docs/18-module-parser.md`
 
-- [ ] Parse import declarations
-- [ ] Parse export declarations
-- [ ] Handle module vs script mode
-- [ ] Write module tests
+- [x] Parse import declarations
+- [x] Parse export declarations
+- [x] Handle module vs script mode
+- [x] Write module tests (68 tests)
 
 **Learning Goals**: ES module system
 
