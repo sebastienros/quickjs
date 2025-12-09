@@ -726,6 +726,7 @@ public sealed class JSContext : IDisposable
         InitializeProxy();
         InitializeConsole();
         InitializeTimers();
+        InitializeGenerators();
     }
 
     private void InitializeObjectConstructor()
@@ -4912,6 +4913,45 @@ public sealed class JSContext : IDisposable
         var result = new JSValue[array.Length - start];
         Array.Copy(array, start, result, 0, result.Length);
         return result;
+    }
+
+    #endregion
+
+    #region Generators
+
+    /// <summary>
+    /// The generator prototype object.
+    /// </summary>
+    private JSObject? _generatorPrototype;
+
+    /// <summary>
+    /// Initializes the Generator prototype and related objects.
+    /// </summary>
+    private void InitializeGenerators()
+    {
+        // Create Generator.prototype
+        var generatorPrototype = new JSObject(GetClassPrototype(JSClassId.Object), JSClassId.Generator);
+
+        // Initialize the prototype with next, return, throw methods
+        JSGenerator.InitializeGeneratorPrototype(this, generatorPrototype);
+
+        // Store for later use
+        _generatorPrototype = generatorPrototype;
+        SetClassPrototype(JSClassId.Generator, generatorPrototype);
+
+        // Create GeneratorFunction constructor (not directly exposed but needed)
+        // GeneratorFunction.prototype.prototype = Generator.prototype
+        var generatorFunctionPrototype = new JSObject(GetClassPrototype(JSClassId.CFunction), JSClassId.CFunction);
+        generatorFunctionPrototype.Set("prototype", JSValue.FromObject(generatorPrototype));
+    }
+
+    /// <summary>
+    /// Gets the Generator prototype object.
+    /// </summary>
+    /// <returns>The Generator prototype.</returns>
+    public JSObject? GetGeneratorPrototype()
+    {
+        return _generatorPrototype;
     }
 
     #endregion

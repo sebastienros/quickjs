@@ -54,11 +54,11 @@ Use `#if` directives when needed:
 | Phase 6: VM & Interpreter | ✅ Complete | 7/7 | ~704 |
 | Phase 7: Built-in Objects | ✅ Complete | 13/13 | ~1077 |
 | Phase 8: Standard Library | ✅ Complete | 3/3 | ~108 |
-| Phase 9: Advanced Features | 🚧 In Progress | 1/4 | ~81 |
+| Phase 9: Advanced Features | 🚧 In Progress | 2/4 | ~103 |
 
-**Total Tests: 2323** (all passing, 0 skipped)
+**Total Tests: 2345** (all passing, 0 skipped)
 
-**Latest Commit**: `step-9.1-eval`
+**Latest Commit**: `step-9.2-generators`
 
 # Detailed Implementation Plan
 
@@ -763,13 +763,13 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 9.2: Generators
+### Step 9.2: Generators ✅
 **Commit**: `step-9.2-generators`  
 **Doc**: `docs/57-generators.md`
 
-- [ ] Implement generator functions
-- [ ] Implement yield/yield*
-- [ ] Write generator tests
+- [x] Implement generator functions
+- [x] Implement yield/yield*
+- [x] Write generator tests
 
 ---
 

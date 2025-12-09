@@ -141,6 +141,13 @@ public sealed class Interpreter
                 return JSValue.Exception;
             }
 
+            // Generator functions return a generator object instead of executing
+            if (func.IsGenerator && !isConstructor)
+            {
+                var generator = new JSGenerator(_context, func, thisVal, args);
+                return JSValue.FromObject(generator);
+            }
+
             var savedFrame = _currentFrame;
             try
             {
@@ -160,6 +167,18 @@ public sealed class Interpreter
 
         _context.ThrowTypeError("Not a function");
         return JSValue.Exception;
+    }
+
+    /// <summary>
+    /// Public method to call a function (used by generators and other components).
+    /// </summary>
+    /// <param name="func">The function to call.</param>
+    /// <param name="thisVal">The 'this' value.</param>
+    /// <param name="args">The arguments.</param>
+    /// <returns>The return value.</returns>
+    public JSValue Call(JSFunction func, JSValue thisVal, JSValue[] args)
+    {
+        return CallFunction(JSValue.FromObject(func), thisVal, args, isConstructor: false);
     }
 
     #endregion
