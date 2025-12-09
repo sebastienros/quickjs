@@ -902,6 +902,7 @@ As each step is completed, documentation files will be added to the `docs/` fold
 | `28-interpreter-control-flow.md` | Control Flow | 6.4 |
 | `29-function-calls.md` | Function Calls | 6.5 |
 | `30-closures.md` | Closures | 6.6 |
+| `31-exception-handling-runtime.md` | Exception Handling (Runtime) | 6.7 |
 | *...more as implementation progresses* | | |
 
 ---
