@@ -186,11 +186,122 @@ public sealed class Parser
 
     /// <summary>
     /// Parses an assignment expression.
+    /// In JavaScript, assignment is right-associative: a = b = c means a = (b = c)
+    /// Assignment operators: = += -= *= /= %= **= &lt;&lt;= &gt;&gt;= &gt;&gt;&gt;= &amp;= ^= |= ??=
     /// </summary>
     public void ParseAssignExpression(ParseFlags flags = ParseFlags.None)
     {
         ParseConditionalExpression(flags);
-        // TODO: Handle assignment operators (=, +=, -=, etc.)
+
+        // Check for assignment operators
+        OpCode compoundOp = OpCode.Nop;
+        bool isAssignment = false;
+        bool isCompound = false;
+
+        switch (_currentToken.Type)
+        {
+            case TokenType.Assign:
+                isAssignment = true;
+                break;
+            case TokenType.PlusAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.Add;
+                break;
+            case TokenType.MinusAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.Sub;
+                break;
+            case TokenType.AsteriskAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.Mul;
+                break;
+            case TokenType.SlashAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.Div;
+                break;
+            case TokenType.PercentAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.Mod;
+                break;
+            case TokenType.PowerAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.Pow;
+                break;
+            case TokenType.LeftShiftAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.Shl;
+                break;
+            case TokenType.RightShiftAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.Sar;
+                break;
+            case TokenType.UnsignedRightShiftAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.Shr;
+                break;
+            case TokenType.AmpersandAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.And;
+                break;
+            case TokenType.CaretAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.Xor;
+                break;
+            case TokenType.PipeAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.Or;
+                break;
+            case TokenType.NullishCoalescingAssign:
+                isAssignment = true;
+                isCompound = true;
+                compoundOp = OpCode.Nop; // Special handling needed
+                break;
+        }
+
+        if (isAssignment)
+        {
+            NextToken(); // consume the assignment operator
+
+            if (isCompound)
+            {
+                // For compound assignment like +=, we need to:
+                // 1. Duplicate the reference (for property access)
+                // 2. Get the current value
+                // 3. Parse the right-hand side
+                // 4. Apply the operation
+                // 5. Store back
+
+                // For now, emit a simple compound assignment pattern
+                // In a full implementation, this would need to handle
+                // property access vs simple variable assignment
+                EmitOp(OpCode.Dup);
+                ParseAssignExpression(flags); // Right-associative
+                EmitOp(compoundOp);
+            }
+            else
+            {
+                // Simple assignment: parse RHS (right-associative)
+                ParseAssignExpression(flags);
+            }
+
+            // The actual store operation depends on what the LHS was
+            // For now, emit a generic put reference value operation
+            // In a full implementation, we'd track whether LHS was a variable,
+            // property access, etc. and emit PutVar, PutLoc, PutField accordingly
+            EmitOp(OpCode.PutRefValue);
+        }
     }
 
     /// <summary>
@@ -504,12 +615,16 @@ public sealed class Parser
     }
 
     /// <summary>
-    /// Parses a unary expression: !expr, -expr, +expr, typeof expr, etc.
+    /// Parses a unary expression: !expr, -expr, +expr, typeof expr, new expr, etc.
     /// </summary>
     public void ParseUnaryExpression(ParseFlags flags)
     {
         switch (_currentToken.Type)
         {
+            case TokenType.New:
+                ParseNewExpression();
+                break;
+
             case TokenType.Plus:
                 NextToken();
                 ParseUnaryExpression(ParseFlags.PowForbidden);
@@ -895,6 +1010,833 @@ public sealed class Parser
         }
 
         Expect(TokenType.RightBrace);
+    }
+
+    /// <summary>
+    /// Parses a new expression: new Constructor() or new Constructor(args)
+    /// In JavaScript, 'new' creates an instance of a constructor function.
+    /// The precedence is tricky: 'new Foo.bar()' means 'new (Foo.bar)()'
+    /// </summary>
+    private void ParseNewExpression()
+    {
+        Expect(TokenType.New);
+
+        // Handle 'new.target' meta-property
+        if (Check(TokenType.Dot))
+        {
+            NextToken(); // consume '.'
+            if (Check(TokenType.Identifier) && (string)_currentToken.Value! == "target")
+            {
+                NextToken(); // consume 'target'
+                EmitOp(OpCode.ScopeGetVar);
+                EmitAtom(_atoms.GetOrCreateAtom("new.target"));
+                EmitU16(0);
+                return;
+            }
+            throw new JSSyntaxError("Expected 'target' after 'new.'", _currentToken.Start);
+        }
+
+        // Parse the constructor expression (can be member expression)
+        // We need to parse the constructor without consuming the call parens
+        ParseMemberExpression();
+
+        // Check for arguments
+        int argc = 0;
+        if (Check(TokenType.LeftParen))
+        {
+            NextToken(); // consume '('
+
+            // Parse arguments
+            while (!Check(TokenType.RightParen))
+            {
+                ParseAssignExpression();
+                argc++;
+
+                if (!Match(TokenType.Comma))
+                    break;
+            }
+
+            Expect(TokenType.RightParen);
+        }
+
+        // Emit the new/call instruction
+        EmitOp(OpCode.CallConstructor);
+        EmitU16((ushort)argc);
+    }
+
+    /// <summary>
+    /// Parses a member expression without the call part.
+    /// Used by 'new' to get the constructor before optional parens.
+    /// </summary>
+    private void ParseMemberExpression()
+    {
+        ParsePrimaryExpression();
+
+        // Handle member access chains: obj.prop, obj[expr]
+        while (true)
+        {
+            if (Match(TokenType.Dot))
+            {
+                // Property access: obj.prop
+                if (!Check(TokenType.Identifier))
+                {
+                    throw new JSSyntaxError(
+                        $"Expected property name after '.', got {_currentToken.Type}",
+                        _currentToken.Start);
+                }
+                var name = (string)_currentToken.Value!;
+                var atom = _atoms.GetOrCreateAtom(name);
+                NextToken();
+
+                EmitOp(OpCode.GetField);
+                EmitAtom(atom);
+            }
+            else if (Match(TokenType.LeftBracket))
+            {
+                // Computed property access: obj[expr]
+                ParseExpression();
+                Expect(TokenType.RightBracket);
+                EmitOp(OpCode.GetArrayEl);
+            }
+            else
+            {
+                break;
+            }
+        }
+    }
+
+    #endregion
+
+    #region Statement Parsing
+
+    /// <summary>
+    /// Parses a program (sequence of statements).
+    /// </summary>
+    public void ParseProgram()
+    {
+        while (!Check(TokenType.EOF))
+        {
+            ParseStatement();
+        }
+    }
+
+    /// <summary>
+    /// Parses a statement.
+    /// </summary>
+    public void ParseStatement()
+    {
+        switch (_currentToken.Type)
+        {
+            case TokenType.LeftBrace:
+                ParseBlockStatement();
+                break;
+
+            case TokenType.Var:
+                ParseVarStatement();
+                break;
+
+            case TokenType.Let:
+                ParseLetStatement();
+                break;
+
+            case TokenType.Const:
+                ParseConstStatement();
+                break;
+
+            case TokenType.If:
+                ParseIfStatement();
+                break;
+
+            case TokenType.While:
+                ParseWhileStatement();
+                break;
+
+            case TokenType.Do:
+                ParseDoWhileStatement();
+                break;
+
+            case TokenType.For:
+                ParseForStatement();
+                break;
+
+            case TokenType.Return:
+                ParseReturnStatement();
+                break;
+
+            case TokenType.Break:
+                ParseBreakStatement();
+                break;
+
+            case TokenType.Continue:
+                ParseContinueStatement();
+                break;
+
+            case TokenType.Throw:
+                ParseThrowStatement();
+                break;
+
+            case TokenType.Try:
+                ParseTryStatement();
+                break;
+
+            case TokenType.Switch:
+                ParseSwitchStatement();
+                break;
+
+            case TokenType.Semicolon:
+                // Empty statement
+                NextToken();
+                break;
+
+            case TokenType.Function:
+                ParseFunctionDeclaration();
+                break;
+
+            default:
+                ParseExpressionStatement();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Parses a block statement: { statements }
+    /// </summary>
+    public void ParseBlockStatement()
+    {
+        Expect(TokenType.LeftBrace);
+        _currentFunction.PushScope();
+
+        while (!Check(TokenType.RightBrace) && !Check(TokenType.EOF))
+        {
+            ParseStatement();
+        }
+
+        _currentFunction.PopScope();
+        Expect(TokenType.RightBrace);
+    }
+
+    /// <summary>
+    /// Parses an expression statement: expr;
+    /// </summary>
+    public void ParseExpressionStatement()
+    {
+        ParseExpression();
+        EmitOp(OpCode.Drop);  // Discard expression result
+        ExpectSemicolon();
+    }
+
+    /// <summary>
+    /// Expects a semicolon, with automatic semicolon insertion support.
+    /// </summary>
+    private void ExpectSemicolon()
+    {
+        if (Check(TokenType.Semicolon))
+        {
+            NextToken();
+        }
+        else if (!Check(TokenType.RightBrace) && !Check(TokenType.EOF) && !_currentToken.HasLineTerminatorBefore)
+        {
+            throw new JSSyntaxError(
+                $"Expected semicolon, got {_currentToken.Type}",
+                _currentToken.Start);
+        }
+        // Otherwise: automatic semicolon insertion
+    }
+
+    #endregion
+
+    #region Variable Declarations
+
+    /// <summary>
+    /// Parses a var statement: var x = expr, y = expr;
+    /// </summary>
+    public void ParseVarStatement()
+    {
+        Expect(TokenType.Var);
+        ParseVariableDeclarationList(JSVarKind.Normal, isLexical: false, isConst: false);
+        ExpectSemicolon();
+    }
+
+    /// <summary>
+    /// Parses a let statement: let x = expr, y = expr;
+    /// </summary>
+    public void ParseLetStatement()
+    {
+        Expect(TokenType.Let);
+        ParseVariableDeclarationList(JSVarKind.Normal, isLexical: true, isConst: false);
+        ExpectSemicolon();
+    }
+
+    /// <summary>
+    /// Parses a const statement: const x = expr, y = expr;
+    /// </summary>
+    public void ParseConstStatement()
+    {
+        Expect(TokenType.Const);
+        ParseVariableDeclarationList(JSVarKind.Normal, isLexical: true, isConst: true);
+        ExpectSemicolon();
+    }
+
+    /// <summary>
+    /// Parses a list of variable declarations.
+    /// </summary>
+    private void ParseVariableDeclarationList(JSVarKind kind, bool isLexical, bool isConst)
+    {
+        do
+        {
+            if (!Check(TokenType.Identifier))
+            {
+                throw new JSSyntaxError(
+                    $"Expected identifier in variable declaration, got {_currentToken.Type}",
+                    _currentToken.Start);
+            }
+
+            var name = (string)_currentToken.Value!;
+            var atom = _atoms.GetOrCreateAtom(name);
+            NextToken();
+
+            // Define the variable
+            int varIdx = _currentFunction.AddVar(atom, kind, isConst, isLexical);
+
+            if (Match(TokenType.Assign))
+            {
+                // Parse initializer
+                ParseAssignExpression();
+
+                // Store the value
+                EmitOp(isLexical ? OpCode.ScopePutVarInit : OpCode.ScopePutVar);
+                EmitAtom(atom);
+                EmitU16((ushort)_currentFunction.ScopeLevel);
+            }
+            else if (isConst)
+            {
+                throw new JSSyntaxError(
+                    "Missing initializer for const variable",
+                    _currentToken.Start);
+            }
+            else if (isLexical)
+            {
+                // Let variables are initialized to undefined
+                EmitOp(OpCode.Undefined);
+                EmitOp(OpCode.ScopePutVarInit);
+                EmitAtom(atom);
+                EmitU16((ushort)_currentFunction.ScopeLevel);
+            }
+        }
+        while (Match(TokenType.Comma));
+    }
+
+    #endregion
+
+    #region Control Flow Statements
+
+    /// <summary>
+    /// Parses an if statement: if (expr) stmt [else stmt]
+    /// </summary>
+    public void ParseIfStatement()
+    {
+        Expect(TokenType.If);
+        Expect(TokenType.LeftParen);
+        ParseExpression();
+        Expect(TokenType.RightParen);
+
+        int labelElse = NewLabel();
+        EmitGoto(OpCode.IfFalse, labelElse);
+
+        ParseStatement();
+
+        if (Match(TokenType.Else))
+        {
+            int labelEnd = NewLabel();
+            EmitGoto(OpCode.Goto, labelEnd);
+            EmitLabel(labelElse);
+            ParseStatement();
+            EmitLabel(labelEnd);
+        }
+        else
+        {
+            EmitLabel(labelElse);
+        }
+    }
+
+    /// <summary>
+    /// Parses a while statement: while (expr) stmt
+    /// </summary>
+    public void ParseWhileStatement()
+    {
+        Expect(TokenType.While);
+
+        int labelContinue = NewLabel();
+        int labelBreak = NewLabel();
+
+        // Push break/continue context
+        PushBreakContext(labelBreak, labelContinue);
+
+        EmitLabel(labelContinue);
+        Expect(TokenType.LeftParen);
+        ParseExpression();
+        Expect(TokenType.RightParen);
+
+        EmitGoto(OpCode.IfFalse, labelBreak);
+
+        ParseStatement();
+
+        EmitGoto(OpCode.Goto, labelContinue);
+        EmitLabel(labelBreak);
+
+        PopBreakContext();
+    }
+
+    /// <summary>
+    /// Parses a do-while statement: do stmt while (expr);
+    /// </summary>
+    public void ParseDoWhileStatement()
+    {
+        Expect(TokenType.Do);
+
+        int labelBody = NewLabel();
+        int labelContinue = NewLabel();
+        int labelBreak = NewLabel();
+
+        PushBreakContext(labelBreak, labelContinue);
+
+        EmitLabel(labelBody);
+        ParseStatement();
+
+        EmitLabel(labelContinue);
+        Expect(TokenType.While);
+        Expect(TokenType.LeftParen);
+        ParseExpression();
+        Expect(TokenType.RightParen);
+
+        EmitGoto(OpCode.IfTrue, labelBody);
+        EmitLabel(labelBreak);
+
+        PopBreakContext();
+        ExpectSemicolon();
+    }
+
+    /// <summary>
+    /// Parses a for statement: for (init; test; update) stmt
+    /// </summary>
+    public void ParseForStatement()
+    {
+        Expect(TokenType.For);
+        Expect(TokenType.LeftParen);
+
+        _currentFunction.PushScope();
+
+        // Parse initialization
+        if (!Check(TokenType.Semicolon))
+        {
+            if (Check(TokenType.Var))
+            {
+                NextToken();
+                ParseVariableDeclarationList(JSVarKind.Normal, isLexical: false, isConst: false);
+            }
+            else if (Check(TokenType.Let))
+            {
+                NextToken();
+                ParseVariableDeclarationList(JSVarKind.Normal, isLexical: true, isConst: false);
+            }
+            else if (Check(TokenType.Const))
+            {
+                NextToken();
+                ParseVariableDeclarationList(JSVarKind.Normal, isLexical: true, isConst: true);
+            }
+            else
+            {
+                ParseExpression();
+                EmitOp(OpCode.Drop);
+            }
+        }
+        Expect(TokenType.Semicolon);
+
+        int labelTest = NewLabel();
+        int labelContinue = NewLabel();
+        int labelBody = NewLabel();
+        int labelBreak = NewLabel();
+
+        PushBreakContext(labelBreak, labelContinue);
+
+        // Test expression
+        EmitLabel(labelTest);
+        if (!Check(TokenType.Semicolon))
+        {
+            ParseExpression();
+            EmitGoto(OpCode.IfFalse, labelBreak);
+        }
+        Expect(TokenType.Semicolon);
+
+        // Skip to body, then come back for update
+        EmitGoto(OpCode.Goto, labelBody);
+
+        // Update expression
+        EmitLabel(labelContinue);
+        if (!Check(TokenType.RightParen))
+        {
+            ParseExpression();
+            EmitOp(OpCode.Drop);
+        }
+        EmitGoto(OpCode.Goto, labelTest);
+        Expect(TokenType.RightParen);
+
+        // Body
+        EmitLabel(labelBody);
+        ParseStatement();
+        EmitGoto(OpCode.Goto, labelContinue);
+
+        EmitLabel(labelBreak);
+
+        PopBreakContext();
+        _currentFunction.PopScope();
+    }
+
+    /// <summary>
+    /// Parses a return statement: return [expr];
+    /// </summary>
+    public void ParseReturnStatement()
+    {
+        Expect(TokenType.Return);
+
+        if (!Check(TokenType.Semicolon) && !Check(TokenType.RightBrace) && 
+            !Check(TokenType.EOF) && !_currentToken.HasLineTerminatorBefore)
+        {
+            ParseExpression();
+            EmitOp(OpCode.Return);
+        }
+        else
+        {
+            EmitOp(OpCode.Undefined);
+            EmitOp(OpCode.Return);
+        }
+
+        ExpectSemicolon();
+    }
+
+    /// <summary>
+    /// Parses a break statement: break [label];
+    /// </summary>
+    public void ParseBreakStatement()
+    {
+        Expect(TokenType.Break);
+
+        // TODO: Handle labeled break
+        if (_breakStack.Count == 0)
+        {
+            throw new JSSyntaxError(
+                "break statement not inside loop or switch",
+                _currentToken.Start);
+        }
+
+        EmitGoto(OpCode.Goto, _breakStack.Peek().BreakLabel);
+        ExpectSemicolon();
+    }
+
+    /// <summary>
+    /// Parses a continue statement: continue [label];
+    /// </summary>
+    public void ParseContinueStatement()
+    {
+        Expect(TokenType.Continue);
+
+        // TODO: Handle labeled continue
+        if (_breakStack.Count == 0)
+        {
+            throw new JSSyntaxError(
+                "continue statement not inside loop",
+                _currentToken.Start);
+        }
+
+        var ctx = _breakStack.Peek();
+        if (ctx.ContinueLabel < 0)
+        {
+            throw new JSSyntaxError(
+                "continue statement not inside loop",
+                _currentToken.Start);
+        }
+
+        EmitGoto(OpCode.Goto, ctx.ContinueLabel);
+        ExpectSemicolon();
+    }
+
+    /// <summary>
+    /// Parses a throw statement: throw expr;
+    /// </summary>
+    public void ParseThrowStatement()
+    {
+        Expect(TokenType.Throw);
+
+        if (_currentToken.HasLineTerminatorBefore)
+        {
+            throw new JSSyntaxError(
+                "Line terminator not allowed after throw",
+                _currentToken.Start);
+        }
+
+        ParseExpression();
+        EmitOp(OpCode.Throw);
+        ExpectSemicolon();
+    }
+
+    /// <summary>
+    /// Parses a try statement: try { } catch (e) { } finally { }
+    /// </summary>
+    public void ParseTryStatement()
+    {
+        Expect(TokenType.Try);
+
+        int labelCatch = NewLabel();
+        int labelFinally = NewLabel();
+        int labelEnd = NewLabel();
+
+        // Emit catch entry point
+        EmitGoto(OpCode.Catch, labelCatch);
+
+        // Try block
+        ParseBlockStatement();
+
+        // Normal exit: jump to finally
+        EmitOp(OpCode.Drop);  // Drop catch offset
+        EmitOp(OpCode.Undefined);  // Dummy value
+        EmitGoto(OpCode.GoSub, labelFinally);
+        EmitOp(OpCode.Drop);
+        EmitGoto(OpCode.Goto, labelEnd);
+
+        // Catch block
+        bool hasCatch = false;
+        if (Check(TokenType.Catch))
+        {
+            hasCatch = true;
+            NextToken();
+            EmitLabel(labelCatch);
+
+            _currentFunction.PushScope();
+
+            // Optional catch parameter
+            if (Match(TokenType.LeftParen))
+            {
+                if (!Check(TokenType.Identifier))
+                {
+                    throw new JSSyntaxError(
+                        "Expected identifier in catch clause",
+                        _currentToken.Start);
+                }
+
+                var name = (string)_currentToken.Value!;
+                var atom = _atoms.GetOrCreateAtom(name);
+                NextToken();
+                Expect(TokenType.RightParen);
+
+                // Define catch variable and store exception
+                _currentFunction.AddVar(atom, JSVarKind.Normal, false, true);
+                EmitOp(OpCode.ScopePutVar);
+                EmitAtom(atom);
+                EmitU16((ushort)_currentFunction.ScopeLevel);
+            }
+            else
+            {
+                // No catch parameter - just drop the exception
+                EmitOp(OpCode.Drop);
+            }
+
+            ParseBlockStatement();
+
+            _currentFunction.PopScope();
+
+            // Jump to finally
+            EmitOp(OpCode.Undefined);
+            EmitGoto(OpCode.GoSub, labelFinally);
+            EmitOp(OpCode.Drop);
+            EmitGoto(OpCode.Goto, labelEnd);
+        }
+
+        if (!hasCatch)
+        {
+            // No catch block - rethrow after finally
+            EmitLabel(labelCatch);
+            EmitGoto(OpCode.GoSub, labelFinally);
+            EmitOp(OpCode.Throw);
+        }
+
+        // Finally block
+        EmitLabel(labelFinally);
+        if (Check(TokenType.Finally))
+        {
+            NextToken();
+            ParseBlockStatement();
+        }
+        EmitOp(OpCode.Ret);  // Return from gosub
+
+        EmitLabel(labelEnd);
+    }
+
+    /// <summary>
+    /// Parses a switch statement: switch (expr) { case expr: stmts }
+    /// </summary>
+    public void ParseSwitchStatement()
+    {
+        Expect(TokenType.Switch);
+        Expect(TokenType.LeftParen);
+        ParseExpression();
+        Expect(TokenType.RightParen);
+        Expect(TokenType.LeftBrace);
+
+        int labelBreak = NewLabel();
+        int labelDefault = -1;
+        var caseLabels = new System.Collections.Generic.List<int>();
+
+        PushBreakContext(labelBreak, -1);  // Switch has break but no continue
+        _currentFunction.PushScope();
+
+        // First pass: collect case expressions and labels
+        int labelNextCase = -1;
+        while (!Check(TokenType.RightBrace) && !Check(TokenType.EOF))
+        {
+            if (Check(TokenType.Case))
+            {
+                NextToken();
+
+                if (labelNextCase >= 0)
+                {
+                    // Previous case falls through, skip comparison
+                    int skipLabel = NewLabel();
+                    EmitGoto(OpCode.Goto, skipLabel);
+                    EmitLabel(labelNextCase);
+                    caseLabels.Add(skipLabel);
+                }
+                else
+                {
+                    labelNextCase = NewLabel();
+                }
+
+                EmitOp(OpCode.Dup);  // Duplicate switch value
+                ParseExpression();
+                Expect(TokenType.Colon);
+                EmitOp(OpCode.StrictEq);
+                int caseLabel = NewLabel();
+                EmitGoto(OpCode.IfTrue, caseLabel);
+                
+                // Chain to next case check or default
+                int nextCheck = NewLabel();
+                EmitGoto(OpCode.Goto, nextCheck);
+                EmitLabel(caseLabel);
+                labelNextCase = nextCheck;
+            }
+            else if (Check(TokenType.Default))
+            {
+                NextToken();
+                Expect(TokenType.Colon);
+                
+                if (labelDefault >= 0)
+                {
+                    throw new JSSyntaxError(
+                        "Duplicate default clause",
+                        _currentToken.Start);
+                }
+
+                if (labelNextCase >= 0)
+                {
+                    EmitGoto(OpCode.Goto, labelNextCase);
+                }
+                labelDefault = NewLabel();
+                EmitLabel(labelDefault);
+                labelNextCase = -1;
+            }
+            else
+            {
+                // Case body statement
+                ParseStatement();
+            }
+        }
+
+        // Handle fall-through to end
+        if (labelNextCase >= 0)
+        {
+            if (labelDefault >= 0)
+            {
+                EmitLabel(labelNextCase);
+                EmitGoto(OpCode.Goto, labelDefault);
+            }
+            else
+            {
+                EmitLabel(labelNextCase);
+            }
+        }
+
+        EmitLabel(labelBreak);
+        EmitOp(OpCode.Drop);  // Drop switch expression
+
+        _currentFunction.PopScope();
+        PopBreakContext();
+        Expect(TokenType.RightBrace);
+    }
+
+    /// <summary>
+    /// Parses a function declaration: function name(params) { body }
+    /// </summary>
+    public void ParseFunctionDeclaration()
+    {
+        Expect(TokenType.Function);
+
+        if (!Check(TokenType.Identifier))
+        {
+            throw new JSSyntaxError(
+                "Expected function name",
+                _currentToken.Start);
+        }
+
+        var name = (string)_currentToken.Value!;
+        var atom = _atoms.GetOrCreateAtom(name);
+        NextToken();
+
+        // TODO: Full function parsing with new JSFunctionDef
+        // For now, skip to the closing brace
+        Expect(TokenType.LeftParen);
+        int parenDepth = 1;
+        while (parenDepth > 0 && !Check(TokenType.EOF))
+        {
+            if (Check(TokenType.LeftParen)) parenDepth++;
+            else if (Check(TokenType.RightParen)) parenDepth--;
+            NextToken();
+        }
+
+        Expect(TokenType.LeftBrace);
+        int braceDepth = 1;
+        while (braceDepth > 0 && !Check(TokenType.EOF))
+        {
+            if (Check(TokenType.LeftBrace)) braceDepth++;
+            else if (Check(TokenType.RightBrace)) braceDepth--;
+            NextToken();
+        }
+    }
+
+    #endregion
+
+    #region Break/Continue Context
+
+    private readonly System.Collections.Generic.Stack<BreakContext> _breakStack = new();
+
+    private struct BreakContext
+    {
+        public int BreakLabel;
+        public int ContinueLabel;
+
+        public BreakContext(int breakLabel, int continueLabel)
+        {
+            BreakLabel = breakLabel;
+            ContinueLabel = continueLabel;
+        }
+    }
+
+    private void PushBreakContext(int breakLabel, int continueLabel)
+    {
+        _breakStack.Push(new BreakContext(breakLabel, continueLabel));
+    }
+
+    private void PopBreakContext()
+    {
+        _breakStack.Pop();
     }
 
     #endregion
