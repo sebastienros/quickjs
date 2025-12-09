@@ -52,7 +52,7 @@ Use `#if` directives when needed:
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
 | Phase 5: Runtime Objects | ✅ Complete | 4/4 | ~500 |
 | Phase 6: VM & Interpreter | ✅ Complete | 7/7 | ~704 |
-| Phase 7: Built-in Objects | ✅ Complete | 5/5 | ~724 |
+| Phase 7: Built-in Objects | 🔄 In Progress | 5/9 | ~724 |
 
 **Total Tests: 3698** (all passing, 0 skipped)
 
