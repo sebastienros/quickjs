@@ -642,6 +642,7 @@ public sealed class JSContext : IDisposable
         InitializeJSON();
         InitializePromise();
         InitializeCollections();
+        InitializeTypedArrays();
     }
 
     private void InitializeObjectConstructor()
@@ -2961,6 +2962,796 @@ public sealed class JSContext : IDisposable
             weakSetProto.Set("delete", JSValue.FromObject(new JSFunction(WeakSetDelete, "delete", 1, functionProto)));
 
             _globalObject.Set("WeakSet", JSValue.FromObject(ctor));
+        }
+    }
+
+    private void InitializeTypedArrays()
+    {
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+
+        // Initialize ArrayBuffer
+        InitializeArrayBuffer();
+
+        // Initialize DataView
+        InitializeDataView();
+
+        // Initialize all TypedArray types
+        InitializeTypedArrayType(TypedArrayKind.Int8, "Int8Array");
+        InitializeTypedArrayType(TypedArrayKind.Uint8, "Uint8Array");
+        InitializeTypedArrayType(TypedArrayKind.Uint8Clamped, "Uint8ClampedArray");
+        InitializeTypedArrayType(TypedArrayKind.Int16, "Int16Array");
+        InitializeTypedArrayType(TypedArrayKind.Uint16, "Uint16Array");
+        InitializeTypedArrayType(TypedArrayKind.Int32, "Int32Array");
+        InitializeTypedArrayType(TypedArrayKind.Uint32, "Uint32Array");
+        InitializeTypedArrayType(TypedArrayKind.Float32, "Float32Array");
+        InitializeTypedArrayType(TypedArrayKind.Float64, "Float64Array");
+        InitializeTypedArrayType(TypedArrayKind.BigInt64, "BigInt64Array");
+        InitializeTypedArrayType(TypedArrayKind.BigUint64, "BigUint64Array");
+
+        void InitializeArrayBuffer()
+        {
+            var arrayBufferProto = new JSObject(objectProto, JSClassId.ArrayBuffer);
+            SetClassPrototype(JSClassId.ArrayBuffer, arrayBufferProto);
+
+            JSValue ArrayBufferCtor(JSValue thisVal, JSValue[] args)
+            {
+                var length = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                if (length < 0)
+                    return ThrowRangeError("Invalid array buffer length");
+                var buffer = new JSArrayBuffer(length);
+                buffer.SetPrototype(arrayBufferProto);
+                return JSValue.FromObject(buffer);
+            }
+
+            var ctor = new JSFunction(ArrayBufferCtor, "ArrayBuffer", 1, functionProto);
+            ctor.Set("prototype", JSValue.FromObject(arrayBufferProto));
+            arrayBufferProto.Set("constructor", JSValue.FromObject(ctor));
+
+            // ArrayBuffer.isView
+            JSValue ArrayBufferIsView(JSValue thisVal, JSValue[] args)
+            {
+                var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+                if (!arg.IsObject) return JSValue.False;
+                var obj = arg.AsObject();
+                return JSValue.FromBoolean(
+                    obj.ClassId.IsTypedArray() || 
+                    obj.ClassId == JSClassId.DataView);
+            }
+
+            // ArrayBuffer.prototype.byteLength getter
+            JSValue ArrayBufferByteLength(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSArrayBuffer ab)
+                    return ThrowTypeError("ArrayBuffer.prototype.byteLength called on non-ArrayBuffer");
+                return JSValue.FromInt32(ab.ByteLength);
+            }
+
+            // ArrayBuffer.prototype.slice
+            JSValue ArrayBufferSlice(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSArrayBuffer ab)
+                    return ThrowTypeError("ArrayBuffer.prototype.slice called on non-ArrayBuffer");
+                var begin = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                int? end = args.Length > 1 && !args[1].IsUndefined 
+                    ? JSValueConversion.ToInt32(args[1]) 
+                    : (int?)null;
+                try
+                {
+                    var result = ab.Slice(begin, end);
+                    result.SetPrototype(arrayBufferProto);
+                    return JSValue.FromObject(result);
+                }
+                catch (InvalidOperationException)
+                {
+                    return ThrowTypeError("ArrayBuffer is detached");
+                }
+            }
+
+            // ArrayBuffer.prototype.transfer
+            JSValue ArrayBufferTransfer(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSArrayBuffer ab)
+                    return ThrowTypeError("ArrayBuffer.prototype.transfer called on non-ArrayBuffer");
+                int? newLength = args.Length > 0 && !args[0].IsUndefined 
+                    ? JSValueConversion.ToInt32(args[0]) 
+                    : (int?)null;
+                try
+                {
+                    var result = ab.Transfer(newLength);
+                    result.SetPrototype(arrayBufferProto);
+                    return JSValue.FromObject(result);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return ThrowTypeError(ex.Message);
+                }
+            }
+
+            // ArrayBuffer.prototype.resize
+            JSValue ArrayBufferResize(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSArrayBuffer ab)
+                    return ThrowTypeError("ArrayBuffer.prototype.resize called on non-ArrayBuffer");
+                var newLength = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                try
+                {
+                    ab.Resize(newLength);
+                    return JSValue.Undefined;
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return ThrowTypeError(ex.Message);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    return ThrowRangeError("Invalid array buffer length");
+                }
+            }
+
+            // ArrayBuffer.prototype.detached getter
+            JSValue ArrayBufferDetached(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSArrayBuffer ab)
+                    return ThrowTypeError("ArrayBuffer.prototype.detached called on non-ArrayBuffer");
+                return JSValue.FromBoolean(ab.IsDetached);
+            }
+
+            // ArrayBuffer.prototype.resizable getter
+            JSValue ArrayBufferResizable(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSArrayBuffer ab)
+                    return ThrowTypeError("ArrayBuffer.prototype.resizable called on non-ArrayBuffer");
+                return JSValue.FromBoolean(ab.Resizable);
+            }
+
+            // ArrayBuffer.prototype.maxByteLength getter
+            JSValue ArrayBufferMaxByteLength(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSArrayBuffer ab)
+                    return ThrowTypeError("ArrayBuffer.prototype.maxByteLength called on non-ArrayBuffer");
+                return JSValue.FromInt32(ab.MaxByteLength < 0 ? ab.ByteLength : ab.MaxByteLength);
+            }
+
+            ctor.Set("isView", JSValue.FromObject(new JSFunction(ArrayBufferIsView, "isView", 1, functionProto)));
+            arrayBufferProto.Set("byteLength", JSValue.FromObject(new JSFunction(ArrayBufferByteLength, "byteLength", 0, functionProto)));
+            arrayBufferProto.Set("slice", JSValue.FromObject(new JSFunction(ArrayBufferSlice, "slice", 2, functionProto)));
+            arrayBufferProto.Set("transfer", JSValue.FromObject(new JSFunction(ArrayBufferTransfer, "transfer", 0, functionProto)));
+            arrayBufferProto.Set("resize", JSValue.FromObject(new JSFunction(ArrayBufferResize, "resize", 1, functionProto)));
+            arrayBufferProto.Set("detached", JSValue.FromObject(new JSFunction(ArrayBufferDetached, "detached", 0, functionProto)));
+            arrayBufferProto.Set("resizable", JSValue.FromObject(new JSFunction(ArrayBufferResizable, "resizable", 0, functionProto)));
+            arrayBufferProto.Set("maxByteLength", JSValue.FromObject(new JSFunction(ArrayBufferMaxByteLength, "maxByteLength", 0, functionProto)));
+
+            _globalObject.Set("ArrayBuffer", JSValue.FromObject(ctor));
+        }
+
+        void InitializeDataView()
+        {
+            var dataViewProto = new JSObject(objectProto, JSClassId.DataView);
+            SetClassPrototype(JSClassId.DataView, dataViewProto);
+
+            JSValue DataViewCtor(JSValue thisVal, JSValue[] args)
+            {
+                if (args.Length == 0 || !args[0].IsObject || args[0].AsObject() is not JSArrayBuffer buffer)
+                    return ThrowTypeError("First argument must be an ArrayBuffer");
+                
+                var byteOffset = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : 0;
+                int? byteLength = args.Length > 2 && !args[2].IsUndefined 
+                    ? JSValueConversion.ToInt32(args[2]) 
+                    : (int?)null;
+
+                try
+                {
+                    var dv = new JSDataView(buffer, byteOffset, byteLength);
+                    dv.SetPrototype(dataViewProto);
+                    return JSValue.FromObject(dv);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return ThrowTypeError(ex.Message);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    return ThrowRangeError("Invalid DataView offset or length");
+                }
+            }
+
+            var ctor = new JSFunction(DataViewCtor, "DataView", 1, functionProto);
+            ctor.Set("prototype", JSValue.FromObject(dataViewProto));
+            dataViewProto.Set("constructor", JSValue.FromObject(ctor));
+
+            // DataView getters
+            JSValue DataViewBuffer(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.buffer called on non-DataView");
+                return JSValue.FromObject(dv.Buffer);
+            }
+
+            JSValue DataViewByteLength(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.byteLength called on non-DataView");
+                return JSValue.FromInt32(dv.ByteLength);
+            }
+
+            JSValue DataViewByteOffset(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.byteOffset called on non-DataView");
+                return JSValue.FromInt32(dv.ByteOffset);
+            }
+
+            // DataView get methods
+            JSValue DataViewGetInt8(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.getInt8 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                try { return JSValue.FromInt32(dv.GetInt8(offset)); }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewGetUint8(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.getUint8 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                try { return JSValue.FromInt32(dv.GetUint8(offset)); }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewGetInt16(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.getInt16 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var littleEndian = args.Length > 1 && args[1].IsTrue;
+                try { return JSValue.FromInt32(dv.GetInt16(offset, littleEndian)); }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewGetUint16(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.getUint16 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var littleEndian = args.Length > 1 && args[1].IsTrue;
+                try { return JSValue.FromInt32(dv.GetUint16(offset, littleEndian)); }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewGetInt32(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.getInt32 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var littleEndian = args.Length > 1 && args[1].IsTrue;
+                try { return JSValue.FromInt32(dv.GetInt32(offset, littleEndian)); }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewGetUint32(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.getUint32 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var littleEndian = args.Length > 1 && args[1].IsTrue;
+                try { return JSValue.FromDouble(dv.GetUint32(offset, littleEndian)); }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewGetFloat32(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.getFloat32 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var littleEndian = args.Length > 1 && args[1].IsTrue;
+                try { return JSValue.FromDouble(dv.GetFloat32(offset, littleEndian)); }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewGetFloat64(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.getFloat64 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var littleEndian = args.Length > 1 && args[1].IsTrue;
+                try { return JSValue.FromDouble(dv.GetFloat64(offset, littleEndian)); }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewGetBigInt64(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.getBigInt64 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var littleEndian = args.Length > 1 && args[1].IsTrue;
+                try { return JSValue.FromDouble(dv.GetBigInt64(offset, littleEndian)); }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewGetBigUint64(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.getBigUint64 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var littleEndian = args.Length > 1 && args[1].IsTrue;
+                try { return JSValue.FromDouble((double)dv.GetBigUint64(offset, littleEndian)); }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            // DataView set methods
+            JSValue DataViewSetInt8(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.setInt8 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var value = args.Length > 1 ? (sbyte)JSValueConversion.ToInt32(args[1]) : (sbyte)0;
+                try { dv.SetInt8(offset, value); return JSValue.Undefined; }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewSetUint8(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.setUint8 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var value = args.Length > 1 ? (byte)JSValueConversion.ToInt32(args[1]) : (byte)0;
+                try { dv.SetUint8(offset, value); return JSValue.Undefined; }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewSetInt16(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.setInt16 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var value = args.Length > 1 ? (short)JSValueConversion.ToInt32(args[1]) : (short)0;
+                var littleEndian = args.Length > 2 && args[2].IsTrue;
+                try { dv.SetInt16(offset, value, littleEndian); return JSValue.Undefined; }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewSetUint16(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.setUint16 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var value = args.Length > 1 ? (ushort)JSValueConversion.ToInt32(args[1]) : (ushort)0;
+                var littleEndian = args.Length > 2 && args[2].IsTrue;
+                try { dv.SetUint16(offset, value, littleEndian); return JSValue.Undefined; }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewSetInt32(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.setInt32 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var value = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : 0;
+                var littleEndian = args.Length > 2 && args[2].IsTrue;
+                try { dv.SetInt32(offset, value, littleEndian); return JSValue.Undefined; }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewSetUint32(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.setUint32 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var value = args.Length > 1 ? (uint)JSValueConversion.ToInt32(args[1]) : 0u;
+                var littleEndian = args.Length > 2 && args[2].IsTrue;
+                try { dv.SetUint32(offset, value, littleEndian); return JSValue.Undefined; }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewSetFloat32(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.setFloat32 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var value = args.Length > 1 ? (float)JSValueConversion.ToNumber(args[1]) : 0f;
+                var littleEndian = args.Length > 2 && args[2].IsTrue;
+                try { dv.SetFloat32(offset, value, littleEndian); return JSValue.Undefined; }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewSetFloat64(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.setFloat64 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var value = args.Length > 1 ? JSValueConversion.ToNumber(args[1]) : 0.0;
+                var littleEndian = args.Length > 2 && args[2].IsTrue;
+                try { dv.SetFloat64(offset, value, littleEndian); return JSValue.Undefined; }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewSetBigInt64(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.setBigInt64 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var value = args.Length > 1 ? (long)JSValueConversion.ToNumber(args[1]) : 0L;
+                var littleEndian = args.Length > 2 && args[2].IsTrue;
+                try { dv.SetBigInt64(offset, value, littleEndian); return JSValue.Undefined; }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            JSValue DataViewSetBigUint64(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSDataView dv)
+                    return ThrowTypeError("DataView.prototype.setBigUint64 called on non-DataView");
+                var offset = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var value = args.Length > 1 ? (ulong)JSValueConversion.ToNumber(args[1]) : 0UL;
+                var littleEndian = args.Length > 2 && args[2].IsTrue;
+                try { dv.SetBigUint64(offset, value, littleEndian); return JSValue.Undefined; }
+                catch { return ThrowRangeError("Offset is outside the bounds of the DataView"); }
+            }
+
+            dataViewProto.Set("buffer", JSValue.FromObject(new JSFunction(DataViewBuffer, "buffer", 0, functionProto)));
+            dataViewProto.Set("byteLength", JSValue.FromObject(new JSFunction(DataViewByteLength, "byteLength", 0, functionProto)));
+            dataViewProto.Set("byteOffset", JSValue.FromObject(new JSFunction(DataViewByteOffset, "byteOffset", 0, functionProto)));
+            dataViewProto.Set("getInt8", JSValue.FromObject(new JSFunction(DataViewGetInt8, "getInt8", 1, functionProto)));
+            dataViewProto.Set("getUint8", JSValue.FromObject(new JSFunction(DataViewGetUint8, "getUint8", 1, functionProto)));
+            dataViewProto.Set("getInt16", JSValue.FromObject(new JSFunction(DataViewGetInt16, "getInt16", 1, functionProto)));
+            dataViewProto.Set("getUint16", JSValue.FromObject(new JSFunction(DataViewGetUint16, "getUint16", 1, functionProto)));
+            dataViewProto.Set("getInt32", JSValue.FromObject(new JSFunction(DataViewGetInt32, "getInt32", 1, functionProto)));
+            dataViewProto.Set("getUint32", JSValue.FromObject(new JSFunction(DataViewGetUint32, "getUint32", 1, functionProto)));
+            dataViewProto.Set("getFloat32", JSValue.FromObject(new JSFunction(DataViewGetFloat32, "getFloat32", 1, functionProto)));
+            dataViewProto.Set("getFloat64", JSValue.FromObject(new JSFunction(DataViewGetFloat64, "getFloat64", 1, functionProto)));
+            dataViewProto.Set("getBigInt64", JSValue.FromObject(new JSFunction(DataViewGetBigInt64, "getBigInt64", 1, functionProto)));
+            dataViewProto.Set("getBigUint64", JSValue.FromObject(new JSFunction(DataViewGetBigUint64, "getBigUint64", 1, functionProto)));
+            dataViewProto.Set("setInt8", JSValue.FromObject(new JSFunction(DataViewSetInt8, "setInt8", 2, functionProto)));
+            dataViewProto.Set("setUint8", JSValue.FromObject(new JSFunction(DataViewSetUint8, "setUint8", 2, functionProto)));
+            dataViewProto.Set("setInt16", JSValue.FromObject(new JSFunction(DataViewSetInt16, "setInt16", 2, functionProto)));
+            dataViewProto.Set("setUint16", JSValue.FromObject(new JSFunction(DataViewSetUint16, "setUint16", 2, functionProto)));
+            dataViewProto.Set("setInt32", JSValue.FromObject(new JSFunction(DataViewSetInt32, "setInt32", 2, functionProto)));
+            dataViewProto.Set("setUint32", JSValue.FromObject(new JSFunction(DataViewSetUint32, "setUint32", 2, functionProto)));
+            dataViewProto.Set("setFloat32", JSValue.FromObject(new JSFunction(DataViewSetFloat32, "setFloat32", 2, functionProto)));
+            dataViewProto.Set("setFloat64", JSValue.FromObject(new JSFunction(DataViewSetFloat64, "setFloat64", 2, functionProto)));
+            dataViewProto.Set("setBigInt64", JSValue.FromObject(new JSFunction(DataViewSetBigInt64, "setBigInt64", 2, functionProto)));
+            dataViewProto.Set("setBigUint64", JSValue.FromObject(new JSFunction(DataViewSetBigUint64, "setBigUint64", 2, functionProto)));
+
+            _globalObject.Set("DataView", JSValue.FromObject(ctor));
+        }
+
+        void InitializeTypedArrayType(TypedArrayKind kind, string name)
+        {
+            var classId = JSTypedArray.GetClassId(kind);
+            var bytesPerElement = JSTypedArray.GetBytesPerElement(kind);
+            var typedArrayProto = new JSObject(objectProto, classId);
+            SetClassPrototype(classId, typedArrayProto);
+
+            JSValue TypedArrayCtor(JSValue thisVal, JSValue[] args)
+            {
+                if (args.Length == 0)
+                {
+                    // new TypedArray() - empty array
+                    var arr = new JSTypedArray(kind, 0);
+                    arr.SetPrototype(typedArrayProto);
+                    return JSValue.FromObject(arr);
+                }
+
+                var arg0 = args[0];
+                
+                // new TypedArray(length)
+                if (arg0.IsNumber)
+                {
+                    var length = JSValueConversion.ToInt32(arg0);
+                    if (length < 0)
+                        return ThrowRangeError("Invalid typed array length");
+                    var arr = new JSTypedArray(kind, length);
+                    arr.SetPrototype(typedArrayProto);
+                    return JSValue.FromObject(arr);
+                }
+
+                // new TypedArray(buffer [, byteOffset [, length]])
+                if (arg0.IsObject && arg0.AsObject() is JSArrayBuffer buffer)
+                {
+                    var byteOffset = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : 0;
+                    int? length = args.Length > 2 && !args[2].IsUndefined 
+                        ? JSValueConversion.ToInt32(args[2]) 
+                        : (int?)null;
+                    try
+                    {
+                        var arr = new JSTypedArray(kind, buffer, byteOffset, length);
+                        arr.SetPrototype(typedArrayProto);
+                        return JSValue.FromObject(arr);
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        return ThrowTypeError(ex.Message);
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        return ThrowRangeError(ex.Message);
+                    }
+                }
+
+                // new TypedArray(typedArray) - copy from another typed array
+                if (arg0.IsObject && arg0.AsObject() is JSTypedArray srcTypedArray)
+                {
+                    var arr = new JSTypedArray(kind, srcTypedArray.Length);
+                    arr.SetPrototype(typedArrayProto);
+                    for (int i = 0; i < srcTypedArray.Length; i++)
+                    {
+                        arr.SetElement(i, srcTypedArray.GetElement(i));
+                    }
+                    return JSValue.FromObject(arr);
+                }
+
+                // new TypedArray(arrayLike) - from array-like object
+                if (arg0.IsObject)
+                {
+                    var srcObj = arg0.AsObject();
+                    var lengthVal = srcObj.Get("length");
+                    var length = lengthVal.IsNumber ? JSValueConversion.ToInt32(lengthVal) : 0;
+                    var arr = new JSTypedArray(kind, length);
+                    arr.SetPrototype(typedArrayProto);
+                    for (int i = 0; i < length; i++)
+                    {
+                        arr.SetElement(i, srcObj.Get((uint)i));
+                    }
+                    return JSValue.FromObject(arr);
+                }
+
+                return ThrowTypeError("Invalid argument for typed array constructor");
+            }
+
+            var ctor = new JSFunction(TypedArrayCtor, name, 0, functionProto);
+            ctor.Set("prototype", JSValue.FromObject(typedArrayProto));
+            ctor.Set("BYTES_PER_ELEMENT", JSValue.FromInt32(bytesPerElement));
+            typedArrayProto.Set("constructor", JSValue.FromObject(ctor));
+            typedArrayProto.Set("BYTES_PER_ELEMENT", JSValue.FromInt32(bytesPerElement));
+
+            // TypedArray.of(...items)
+            JSValue TypedArrayOf(JSValue thisVal, JSValue[] args)
+            {
+                var arr = new JSTypedArray(kind, args.Length);
+                arr.SetPrototype(typedArrayProto);
+                for (int i = 0; i < args.Length; i++)
+                {
+                    arr.SetElement(i, args[i]);
+                }
+                return JSValue.FromObject(arr);
+            }
+
+            // TypedArray.from(source [, mapFn [, thisArg]])
+            JSValue TypedArrayFrom(JSValue thisVal, JSValue[] args)
+            {
+                if (args.Length == 0)
+                    return ThrowTypeError("TypedArray.from requires at least 1 argument");
+                
+                var source = args[0];
+                if (!source.IsObject)
+                    return ThrowTypeError("TypedArray.from requires an array-like object");
+                
+                var srcObj = source.AsObject();
+                var lengthVal = srcObj.Get("length");
+                var length = lengthVal.IsNumber ? JSValueConversion.ToInt32(lengthVal) : 0;
+                var arr = new JSTypedArray(kind, length);
+                arr.SetPrototype(typedArrayProto);
+
+                // TODO: Support mapFn parameter
+                for (int i = 0; i < length; i++)
+                {
+                    arr.SetElement(i, srcObj.Get((uint)i));
+                }
+                return JSValue.FromObject(arr);
+            }
+
+            // TypedArray.prototype.buffer
+            JSValue TypedArrayBuffer(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.buffer called on non-{name}");
+                return JSValue.FromObject(ta.Buffer);
+            }
+
+            // TypedArray.prototype.byteLength
+            JSValue TypedArrayByteLength(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.byteLength called on non-{name}");
+                return JSValue.FromInt32(ta.ByteLength);
+            }
+
+            // TypedArray.prototype.byteOffset
+            JSValue TypedArrayByteOffset(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.byteOffset called on non-{name}");
+                return JSValue.FromInt32(ta.ByteOffset);
+            }
+
+            // TypedArray.prototype.length
+            JSValue TypedArrayLength(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.length called on non-{name}");
+                return JSValue.FromInt32(ta.Length);
+            }
+
+            // TypedArray.prototype.set(array [, offset])
+            JSValue TypedArraySet(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.set called on non-{name}");
+                if (args.Length == 0)
+                    return ThrowTypeError("set requires at least 1 argument");
+                var offset = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : 0;
+                
+                if (args[0].IsObject && args[0].AsObject() is JSTypedArray srcTa)
+                {
+                    for (int i = 0; i < srcTa.Length; i++)
+                    {
+                        ta.SetElement(offset + i, srcTa.GetElement(i));
+                    }
+                }
+                else if (args[0].IsObject)
+                {
+                    var srcObj = args[0].AsObject();
+                    var lengthVal = srcObj.Get("length");
+                    var length = lengthVal.IsNumber ? JSValueConversion.ToInt32(lengthVal) : 0;
+                    for (int i = 0; i < length; i++)
+                    {
+                        ta.SetElement(offset + i, srcObj.Get((uint)i));
+                    }
+                }
+                return JSValue.Undefined;
+            }
+
+            // TypedArray.prototype.subarray([begin [, end]])
+            JSValue TypedArraySubarray(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.subarray called on non-{name}");
+                var begin = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                int? end = args.Length > 1 && !args[1].IsUndefined 
+                    ? JSValueConversion.ToInt32(args[1]) 
+                    : (int?)null;
+                var result = ta.Subarray(begin, end);
+                result.SetPrototype(typedArrayProto);
+                return JSValue.FromObject(result);
+            }
+
+            // TypedArray.prototype.slice([begin [, end]])
+            JSValue TypedArraySlice(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.slice called on non-{name}");
+                var begin = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                int? end = args.Length > 1 && !args[1].IsUndefined 
+                    ? JSValueConversion.ToInt32(args[1]) 
+                    : (int?)null;
+                var result = ta.Slice(begin, end);
+                result.SetPrototype(typedArrayProto);
+                return JSValue.FromObject(result);
+            }
+
+            // TypedArray.prototype.fill(value [, start [, end]])
+            JSValue TypedArrayFill(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.fill called on non-{name}");
+                var value = args.Length > 0 ? args[0] : JSValue.Undefined;
+                var start = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : 0;
+                int? end = args.Length > 2 && !args[2].IsUndefined 
+                    ? JSValueConversion.ToInt32(args[2]) 
+                    : (int?)null;
+                ta.Fill(value, start, end);
+                return thisVal;
+            }
+
+            // TypedArray.prototype.copyWithin(target, start [, end])
+            JSValue TypedArrayCopyWithin(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.copyWithin called on non-{name}");
+                var target = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                var start = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : 0;
+                int? end = args.Length > 2 && !args[2].IsUndefined 
+                    ? JSValueConversion.ToInt32(args[2]) 
+                    : (int?)null;
+                ta.CopyWithin(target, start, end);
+                return thisVal;
+            }
+
+            // TypedArray.prototype.reverse()
+            JSValue TypedArrayReverse(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.reverse called on non-{name}");
+                ta.Reverse();
+                return thisVal;
+            }
+
+            // TypedArray.prototype.sort([compareFunction])
+            JSValue TypedArraySort(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.sort called on non-{name}");
+                // TODO: Support compareFunction
+                ta.Sort();
+                return thisVal;
+            }
+
+            // TypedArray.prototype.indexOf(searchElement [, fromIndex])
+            JSValue TypedArrayIndexOf(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.indexOf called on non-{name}");
+                var searchElement = args.Length > 0 ? args[0] : JSValue.Undefined;
+                var fromIndex = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : 0;
+                return JSValue.FromInt32(ta.IndexOf(searchElement, fromIndex));
+            }
+
+            // TypedArray.prototype.lastIndexOf(searchElement [, fromIndex])
+            JSValue TypedArrayLastIndexOf(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.lastIndexOf called on non-{name}");
+                var searchElement = args.Length > 0 ? args[0] : JSValue.Undefined;
+                int? fromIndex = args.Length > 1 && !args[1].IsUndefined 
+                    ? JSValueConversion.ToInt32(args[1]) 
+                    : (int?)null;
+                return JSValue.FromInt32(ta.LastIndexOf(searchElement, fromIndex));
+            }
+
+            // TypedArray.prototype.includes(searchElement [, fromIndex])
+            JSValue TypedArrayIncludes(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.includes called on non-{name}");
+                var searchElement = args.Length > 0 ? args[0] : JSValue.Undefined;
+                var fromIndex = args.Length > 1 ? JSValueConversion.ToInt32(args[1]) : 0;
+                return JSValue.FromBoolean(ta.Includes(searchElement, fromIndex));
+            }
+
+            // TypedArray.prototype.join([separator])
+            JSValue TypedArrayJoin(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.join called on non-{name}");
+                var separator = args.Length > 0 && !args[0].IsUndefined 
+                    ? JSValueConversion.ToString(args[0]) 
+                    : ",";
+                return JSValue.FromString(ta.Join(separator));
+            }
+
+            // TypedArray.prototype.at(index)
+            JSValue TypedArrayAt(JSValue thisVal, JSValue[] args)
+            {
+                if (!thisVal.IsObject || thisVal.AsObject() is not JSTypedArray ta)
+                    return ThrowTypeError($"{name}.prototype.at called on non-{name}");
+                var index = args.Length > 0 ? JSValueConversion.ToInt32(args[0]) : 0;
+                if (index < 0) index = ta.Length + index;
+                if (index < 0 || index >= ta.Length) return JSValue.Undefined;
+                return ta.GetElement(index);
+            }
+
+            ctor.Set("of", JSValue.FromObject(new JSFunction(TypedArrayOf, "of", 0, functionProto)));
+            ctor.Set("from", JSValue.FromObject(new JSFunction(TypedArrayFrom, "from", 1, functionProto)));
+            typedArrayProto.Set("buffer", JSValue.FromObject(new JSFunction(TypedArrayBuffer, "buffer", 0, functionProto)));
+            typedArrayProto.Set("byteLength", JSValue.FromObject(new JSFunction(TypedArrayByteLength, "byteLength", 0, functionProto)));
+            typedArrayProto.Set("byteOffset", JSValue.FromObject(new JSFunction(TypedArrayByteOffset, "byteOffset", 0, functionProto)));
+            typedArrayProto.Set("length", JSValue.FromObject(new JSFunction(TypedArrayLength, "length", 0, functionProto)));
+            typedArrayProto.Set("set", JSValue.FromObject(new JSFunction(TypedArraySet, "set", 1, functionProto)));
+            typedArrayProto.Set("subarray", JSValue.FromObject(new JSFunction(TypedArraySubarray, "subarray", 0, functionProto)));
+            typedArrayProto.Set("slice", JSValue.FromObject(new JSFunction(TypedArraySlice, "slice", 0, functionProto)));
+            typedArrayProto.Set("fill", JSValue.FromObject(new JSFunction(TypedArrayFill, "fill", 1, functionProto)));
+            typedArrayProto.Set("copyWithin", JSValue.FromObject(new JSFunction(TypedArrayCopyWithin, "copyWithin", 2, functionProto)));
+            typedArrayProto.Set("reverse", JSValue.FromObject(new JSFunction(TypedArrayReverse, "reverse", 0, functionProto)));
+            typedArrayProto.Set("sort", JSValue.FromObject(new JSFunction(TypedArraySort, "sort", 1, functionProto)));
+            typedArrayProto.Set("indexOf", JSValue.FromObject(new JSFunction(TypedArrayIndexOf, "indexOf", 1, functionProto)));
+            typedArrayProto.Set("lastIndexOf", JSValue.FromObject(new JSFunction(TypedArrayLastIndexOf, "lastIndexOf", 1, functionProto)));
+            typedArrayProto.Set("includes", JSValue.FromObject(new JSFunction(TypedArrayIncludes, "includes", 1, functionProto)));
+            typedArrayProto.Set("join", JSValue.FromObject(new JSFunction(TypedArrayJoin, "join", 1, functionProto)));
+            typedArrayProto.Set("at", JSValue.FromObject(new JSFunction(TypedArrayAt, "at", 1, functionProto)));
+
+            _globalObject.Set(name, JSValue.FromObject(ctor));
         }
     }
 
