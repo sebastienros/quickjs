@@ -646,6 +646,7 @@ public sealed class JSContext : IDisposable
         InitializeDate();
         InitializeSymbol();
         InitializeReflect();
+        InitializeProxy();
     }
 
     private void InitializeObjectConstructor()
@@ -4587,6 +4588,81 @@ public sealed class JSContext : IDisposable
         reflectObj.Set("setPrototypeOf", JSValue.FromObject(new JSFunction(ReflectSetPrototypeOf, "setPrototypeOf", 2, functionProto)));
 
         _globalObject.Set("Reflect", JSValue.FromObject(reflectObj));
+    }
+
+    private void InitializeProxy()
+    {
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+
+        // Proxy constructor: new Proxy(target, handler)
+        JSValue ProxyCtor(JSValue thisVal, JSValue[] args)
+        {
+            // Proxy must be called with 'new'
+            if (!thisVal.IsObject)
+                return ThrowTypeError("Proxy constructor requires 'new'");
+
+            if (args.Length < 2)
+                return ThrowTypeError("Proxy requires target and handler arguments");
+
+            if (!args[0].IsObject)
+                return ThrowTypeError("Proxy target must be an object");
+
+            if (!args[1].IsObject)
+                return ThrowTypeError("Proxy handler must be an object");
+
+            var target = args[0].AsObject();
+            var handler = args[1].AsObject();
+
+            // Check if target is a revoked proxy
+            if (target is JSProxy targetProxy && targetProxy.IsRevoked)
+                return ThrowTypeError("Cannot create Proxy with a revoked proxy as target");
+
+            // Check if handler is a revoked proxy
+            if (handler is JSProxy handlerProxy && handlerProxy.IsRevoked)
+                return ThrowTypeError("Cannot create Proxy with a revoked proxy as handler");
+
+            var proxy = new JSProxy(target, handler, objectProto);
+            return JSValue.FromObject(proxy);
+        }
+
+        // Proxy.revocable(target, handler)
+        JSValue ProxyRevocable(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 2)
+                return ThrowTypeError("Proxy.revocable requires target and handler arguments");
+
+            if (!args[0].IsObject)
+                return ThrowTypeError("Proxy target must be an object");
+
+            if (!args[1].IsObject)
+                return ThrowTypeError("Proxy handler must be an object");
+
+            var target = args[0].AsObject();
+            var handler = args[1].AsObject();
+
+            var proxy = new JSProxy(target, handler, objectProto);
+
+            // Create the result object { proxy, revoke }
+            var result = new JSObject(objectProto, JSClassId.Object);
+            result.Set("proxy", JSValue.FromObject(proxy));
+
+            // Create revoke function
+            JSValue RevokeFn(JSValue thisArg, JSValue[] fnArgs)
+            {
+                proxy.Revoke();
+                return JSValue.Undefined;
+            }
+
+            result.Set("revoke", JSValue.FromObject(new JSFunction(RevokeFn, "revoke", 0, functionProto)));
+
+            return JSValue.FromObject(result);
+        }
+
+        var proxyCtor = new JSFunction(ProxyCtor, "Proxy", 2, functionProto);
+        proxyCtor.Set("revocable", JSValue.FromObject(new JSFunction(ProxyRevocable, "revocable", 2, functionProto)));
+
+        _globalObject.Set("Proxy", JSValue.FromObject(proxyCtor));
     }
 
     #endregion
