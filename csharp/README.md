@@ -50,12 +50,12 @@ Use `#if` directives when needed:
 | Phase 2: Lexer | ✅ Complete | 2/2 | ~100 |
 | Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
-| Phase 5: Runtime Objects | 🔄 In Progress | 3/4 | ~500 |
+| Phase 5: Runtime Objects | ✅ Complete | 4/4 | ~500 |
 | Phase 6: VM & Interpreter | ⏳ Planned | 0/7 | - |
 
-**Total Tests: 2778** (all passing, 0 skipped)
+**Total Tests: 2952** (all passing, 0 skipped)
 
-**Latest Commit**: `step-5.3-jsfunction`
+**Latest Commit**: `step-5.4-array-object`
 
 # Detailed Implementation Plan
 
@@ -453,17 +453,17 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 5.4: Array Object
+### Step 5.4: Array Object ✅
 **Commit**: `step-5.4-array-object`  
 **Doc**: `docs/24-array-object.md`
 
-- [ ] Implement JSArray with indexed properties
-- [ ] Implement length property behavior
-- [ ] Implement array methods (push, pop, etc.)
-- [ ] Implement array iteration
-- [ ] Write array tests
+- [x] Implement JSArray with indexed properties
+- [x] Implement length property behavior
+- [x] Implement array methods (push, pop, slice, concat, etc.)
+- [x] Implement array iteration (IEnumerable<JSValue>)
+- [x] Write array tests (87 new tests)
 
-**Learning Goals**: Array implementation, exotic objects
+**Learning Goals**: Array implementation, exotic objects, fast array optimization
 
 ---
 
