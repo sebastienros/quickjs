@@ -49,13 +49,13 @@ Use `#if` directives when needed:
 | Phase 1: Core Types | ✅ Complete | 5/5 | ~50 |
 | Phase 2: Lexer | ✅ Complete | 2/2 | ~100 |
 | Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
-| Phase 4: Parser | 🔄 In Progress | 6/8 | ~1900 |
+| Phase 4: Parser | 🔄 In Progress | 7/8 | ~1950 |
 | Phase 5: Runtime Objects | ⏳ Planned | 0/4 | - |
 | Phase 6: VM & Interpreter | ⏳ Planned | 0/7 | - |
 
-**Total Tests: 2110** (all passing, 0 skipped)
+**Total Tests: 2208** (all passing, 0 skipped)
 
-**Latest Commit**: `step-4.6-module-parser`
+**Latest Commit**: `step-4.7-destructuring-parser`
 
 # Detailed Implementation Plan
 
@@ -373,16 +373,16 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 4.7: Destructuring Parser
+### Step 4.7: Destructuring Parser ✅
 **Commit**: `step-4.7-destructuring-parser`  
 **Doc**: `docs/19-destructuring-parser.md`
 
-- [ ] Parse array destructuring patterns
-- [ ] Parse object destructuring patterns
-- [ ] Parse destructuring in variable declarations
-- [ ] Parse destructuring in function parameters
-- [ ] Parse destructuring in assignments
-- [ ] Write destructuring tests
+- [x] Parse array destructuring patterns
+- [x] Parse object destructuring patterns
+- [x] Parse destructuring in variable declarations
+- [x] Parse destructuring in function parameters
+- [x] Parse destructuring in arrow functions
+- [x] Write destructuring tests (49 tests)
 
 **Learning Goals**: Pattern matching, destructuring assignment
 

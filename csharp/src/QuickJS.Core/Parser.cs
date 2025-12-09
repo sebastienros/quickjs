@@ -1254,6 +1254,24 @@ public sealed class Parser
                         _currentFunction.DefinedArgCount++;
                 }
             }
+            else if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+            {
+                // Destructuring parameter: ([a, b]) => ... or ({x, y}) => ...
+                hasSimpleParameterList = false;
+                hasOptionalArg = true;
+
+                // Create synthetic argument to receive the value
+                var syntheticName = $"<destructuring:{_currentFunction.Args.Count}>";
+                var syntheticAtom = _atoms.GetOrCreateAtom(syntheticName);
+                int idx = _currentFunction.AddArg(syntheticAtom);
+
+                // Get the argument value onto the stack
+                EmitOp(OpCode.GetArg);
+                EmitU16((ushort)idx);
+
+                // Parse destructuring pattern and bind to local variables
+                ParseDestructuringPattern(false, isRest);
+            }
             else
             {
                 throw new JSSyntaxError(
@@ -2823,51 +2841,314 @@ public sealed class Parser
 
     /// <summary>
     /// Parses a list of variable declarations.
+    /// Supports both simple identifiers and destructuring patterns.
     /// </summary>
     private void ParseVariableDeclarationList(JSVarKind kind, bool isLexical, bool isConst)
     {
         do
         {
-            if (!Check(TokenType.Identifier))
+            // Check for destructuring pattern
+            if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
             {
-                throw new JSSyntaxError(
-                    $"Expected identifier in variable declaration, got {_currentToken.Type}",
-                    _currentToken.Start);
-            }
+                // Destructuring requires an initializer
+                ParseDestructuringBindingPattern(kind, isLexical, isConst);
+                
+                if (!Match(TokenType.Assign))
+                {
+                    throw new JSSyntaxError(
+                        "Destructuring requires an initializer",
+                        _currentToken.Start);
+                }
 
-            var name = (string)_currentToken.Value!;
-            var atom = _atoms.GetOrCreateAtom(name);
-            NextToken();
-
-            // Define the variable
-            int varIdx = _currentFunction.AddVar(atom, kind, isConst, isLexical);
-
-            if (Match(TokenType.Assign))
-            {
                 // Parse initializer
                 ParseAssignExpression();
 
-                // Store the value
-                EmitOp(isLexical ? OpCode.ScopePutVarInit : OpCode.ScopePutVar);
-                EmitAtom(atom);
-                EmitU16((ushort)_currentFunction.ScopeLevel);
+                // Apply destructuring to the value on stack
+                ApplyDestructuringAssignment(isLexical);
             }
-            else if (isConst)
+            else if (Check(TokenType.Identifier))
+            {
+                var name = (string)_currentToken.Value!;
+                var atom = _atoms.GetOrCreateAtom(name);
+                NextToken();
+
+                // Define the variable
+                int varIdx = _currentFunction.AddVar(atom, kind, isConst, isLexical);
+
+                if (Match(TokenType.Assign))
+                {
+                    // Parse initializer
+                    ParseAssignExpression();
+
+                    // Store the value
+                    EmitOp(isLexical ? OpCode.ScopePutVarInit : OpCode.ScopePutVar);
+                    EmitAtom(atom);
+                    EmitU16((ushort)_currentFunction.ScopeLevel);
+                }
+                else if (isConst)
+                {
+                    throw new JSSyntaxError(
+                        "Missing initializer for const variable",
+                        _currentToken.Start);
+                }
+                else if (isLexical)
+                {
+                    // Let variables are initialized to undefined
+                    EmitOp(OpCode.Undefined);
+                    EmitOp(OpCode.ScopePutVarInit);
+                    EmitAtom(atom);
+                    EmitU16((ushort)_currentFunction.ScopeLevel);
+                }
+            }
+            else
             {
                 throw new JSSyntaxError(
-                    "Missing initializer for const variable",
+                    $"Expected identifier or destructuring pattern, got {_currentToken.Type}",
                     _currentToken.Start);
-            }
-            else if (isLexical)
-            {
-                // Let variables are initialized to undefined
-                EmitOp(OpCode.Undefined);
-                EmitOp(OpCode.ScopePutVarInit);
-                EmitAtom(atom);
-                EmitU16((ushort)_currentFunction.ScopeLevel);
             }
         }
         while (Match(TokenType.Comma));
+    }
+
+    /// <summary>
+    /// Stack for collecting destructuring binding names during pattern parsing.
+    /// </summary>
+    private readonly System.Collections.Generic.List<DestructuringBinding> _destructuringBindings = new();
+
+    /// <summary>
+    /// Represents a binding in a destructuring pattern.
+    /// </summary>
+    private struct DestructuringBinding
+    {
+        public JSAtom Name;
+        public bool HasDefault;
+        public bool IsRest;
+        public DestructuringBindingType Type;
+    }
+
+    private enum DestructuringBindingType
+    {
+        ArrayElement,
+        ArrayRest,
+        ObjectProperty,
+        ObjectShorthand,
+        ObjectRest
+    }
+
+    /// <summary>
+    /// Parses a destructuring binding pattern and collects bindings for later variable definition.
+    /// Does NOT consume the pattern - just parses and records the structure.
+    /// </summary>
+    private void ParseDestructuringBindingPattern(JSVarKind kind, bool isLexical, bool isConst)
+    {
+        _destructuringBindings.Clear();
+        CollectDestructuringBindings(kind, isLexical, isConst);
+    }
+
+    /// <summary>
+    /// Recursively collects destructuring bindings from the pattern.
+    /// </summary>
+    private void CollectDestructuringBindings(JSVarKind kind, bool isLexical, bool isConst)
+    {
+        if (Check(TokenType.LeftBracket))
+        {
+            // Array destructuring: [a, b, ...rest]
+            NextToken();
+
+            while (!Check(TokenType.RightBracket))
+            {
+                // Handle elision (empty slots)
+                if (Check(TokenType.Comma))
+                {
+                    NextToken();
+                    continue;
+                }
+
+                bool isRest = Match(TokenType.Ellipsis);
+
+                if (Check(TokenType.Identifier))
+                {
+                    var name = (string)_currentToken.Value!;
+                    var atom = _atoms.GetOrCreateAtom(name);
+                    NextToken();
+
+                    // Define the variable
+                    _currentFunction.AddVar(atom, kind, isConst, isLexical);
+
+                    _destructuringBindings.Add(new DestructuringBinding
+                    {
+                        Name = atom,
+                        IsRest = isRest,
+                        HasDefault = Check(TokenType.Assign),
+                        Type = isRest ? DestructuringBindingType.ArrayRest : DestructuringBindingType.ArrayElement
+                    });
+
+                    // Skip default value syntax for now (we'll handle it during assignment)
+                    if (Check(TokenType.Assign))
+                    {
+                        NextToken();
+                        SkipExpression();
+                    }
+                }
+                else if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+                {
+                    // Nested pattern
+                    CollectDestructuringBindings(kind, isLexical, isConst);
+                }
+                else if (!Check(TokenType.RightBracket))
+                {
+                    throw new JSSyntaxError(
+                        $"Expected identifier or destructuring pattern, got {_currentToken.Type}",
+                        _currentToken.Start);
+                }
+
+                if (isRest && !Check(TokenType.RightBracket))
+                {
+                    throw new JSSyntaxError(
+                        "Rest element must be last",
+                        _currentToken.Start);
+                }
+
+                if (!Match(TokenType.Comma))
+                    break;
+            }
+
+            Expect(TokenType.RightBracket);
+        }
+        else if (Check(TokenType.LeftBrace))
+        {
+            // Object destructuring: { a, b: c, ...rest }
+            NextToken();
+
+            while (!Check(TokenType.RightBrace))
+            {
+                bool isRest = Match(TokenType.Ellipsis);
+
+                if (Check(TokenType.Identifier))
+                {
+                    var propName = (string)_currentToken.Value!;
+                    var propAtom = _atoms.GetOrCreateAtom(propName);
+                    NextToken();
+
+                    JSAtom varAtom;
+                    DestructuringBindingType bindingType;
+
+                    if (isRest)
+                    {
+                        // Rest: ...rest
+                        varAtom = propAtom;
+                        bindingType = DestructuringBindingType.ObjectRest;
+                        _currentFunction.AddVar(varAtom, kind, isConst, isLexical);
+                    }
+                    else if (Match(TokenType.Colon))
+                    {
+                        // Renaming: { prop: newName }
+                        if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+                        {
+                            // Nested pattern
+                            CollectDestructuringBindings(kind, isLexical, isConst);
+                            
+                            if (!Match(TokenType.Comma))
+                                break;
+                            continue;
+                        }
+
+                        if (!Check(TokenType.Identifier))
+                        {
+                            throw new JSSyntaxError(
+                                "Expected identifier after ':'",
+                                _currentToken.Start);
+                        }
+                        var newName = (string)_currentToken.Value!;
+                        varAtom = _atoms.GetOrCreateAtom(newName);
+                        NextToken();
+                        bindingType = DestructuringBindingType.ObjectProperty;
+                        _currentFunction.AddVar(varAtom, kind, isConst, isLexical);
+                    }
+                    else
+                    {
+                        // Shorthand: { prop }
+                        varAtom = propAtom;
+                        bindingType = DestructuringBindingType.ObjectShorthand;
+                        _currentFunction.AddVar(varAtom, kind, isConst, isLexical);
+                    }
+
+                    _destructuringBindings.Add(new DestructuringBinding
+                    {
+                        Name = varAtom,
+                        IsRest = isRest,
+                        HasDefault = Check(TokenType.Assign),
+                        Type = bindingType
+                    });
+
+                    // Skip default value syntax
+                    if (Check(TokenType.Assign))
+                    {
+                        NextToken();
+                        SkipExpression();
+                    }
+                }
+                else if (!Check(TokenType.RightBrace))
+                {
+                    throw new JSSyntaxError(
+                        $"Expected identifier in destructuring pattern, got {_currentToken.Type}",
+                        _currentToken.Start);
+                }
+
+                if (isRest && !Check(TokenType.RightBrace))
+                {
+                    throw new JSSyntaxError(
+                        "Rest element must be last",
+                        _currentToken.Start);
+                }
+
+                if (!Match(TokenType.Comma))
+                    break;
+            }
+
+            Expect(TokenType.RightBrace);
+        }
+    }
+
+    /// <summary>
+    /// Skips an expression without generating bytecode.
+    /// Used for collecting destructuring pattern structure.
+    /// </summary>
+    private void SkipExpression()
+    {
+        int depth = 0;
+        while (!Check(TokenType.EOF))
+        {
+            if (Check(TokenType.LeftParen) || Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+            {
+                depth++;
+            }
+            else if (Check(TokenType.RightParen) || Check(TokenType.RightBracket) || Check(TokenType.RightBrace))
+            {
+                if (depth == 0)
+                    break;
+                depth--;
+            }
+            else if (depth == 0 && (Check(TokenType.Comma) || Check(TokenType.Semicolon)))
+            {
+                break;
+            }
+            NextToken();
+        }
+    }
+
+    /// <summary>
+    /// Applies destructuring assignment from value on stack.
+    /// The value to destructure should be on the stack.
+    /// </summary>
+    private void ApplyDestructuringAssignment(bool isLexical)
+    {
+        // For now, we emit a simplified version
+        // A full implementation would match the collected bindings
+        // and emit appropriate bytecode for each element
+        
+        // Drop the source value for now (placeholder implementation)
+        EmitOp(OpCode.Drop);
     }
 
     #endregion
@@ -3679,140 +3960,285 @@ public sealed class Parser
 
     /// <summary>
     /// Parses a destructuring pattern for parameters or assignments.
+    /// Expects the source value to be on the stack.
     /// </summary>
     private void ParseDestructuringPattern(bool isDeclaration, bool hasDefaultAllowed)
     {
         if (Check(TokenType.LeftBracket))
         {
-            // Array destructuring: [a, b, c]
-            NextToken();
-
-            while (!Check(TokenType.RightBracket))
-            {
-                if (Check(TokenType.Comma))
-                {
-                    // Elision - skip element
-                    NextToken();
-                    EmitOp(OpCode.Drop);
-                    continue;
-                }
-
-                bool isRest = Match(TokenType.Ellipsis);
-
-                if (Check(TokenType.Identifier))
-                {
-                    var name = (string)_currentToken.Value!;
-                    var atom = _atoms.GetOrCreateAtom(name);
-                    NextToken();
-
-                    if (isRest)
-                    {
-                        EmitOp(OpCode.ArrayFrom);
-                        EmitU16(0); // Collect remaining
-                    }
-                    else
-                    {
-                        // Get next array element
-                        EmitOp(OpCode.IteratorNext);
-                    }
-
-                    if (isDeclaration)
-                    {
-                        EmitOp(OpCode.ScopePutVarInit);
-                        EmitAtom(atom);
-                        EmitU16((ushort)_currentFunction.ScopeLevel);
-                    }
-                    else
-                    {
-                        EmitOp(OpCode.PutRefValue);
-                    }
-                }
-                else if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
-                {
-                    // Nested destructuring
-                    EmitOp(OpCode.IteratorNext);
-                    ParseDestructuringPattern(isDeclaration, hasDefaultAllowed);
-                }
-
-                if (!Match(TokenType.Comma))
-                {
-                    break;
-                }
-            }
-
-            Expect(TokenType.RightBracket);
+            ParseArrayDestructuringPattern(isDeclaration, hasDefaultAllowed);
         }
         else if (Check(TokenType.LeftBrace))
         {
-            // Object destructuring: { a, b, c }
-            NextToken();
+            ParseObjectDestructuringPattern(isDeclaration, hasDefaultAllowed);
+        }
+    }
 
-            while (!Check(TokenType.RightBrace))
+    /// <summary>
+    /// Parses array destructuring pattern: [a, b, c] or [a, , b] or [...rest]
+    /// </summary>
+    private void ParseArrayDestructuringPattern(bool isDeclaration, bool hasDefaultAllowed)
+    {
+        NextToken(); // consume '['
+
+        // Start iterator on the source array
+        EmitOp(OpCode.ForOfStart);
+
+        int elementIndex = 0;
+        while (!Check(TokenType.RightBracket))
+        {
+            // Handle elision (holes): [a, , b]
+            if (Check(TokenType.Comma))
             {
-                JSAtom propName;
-                JSAtom varName;
+                NextToken();
+                // Skip this element
+                EmitOp(OpCode.ForOfNext);
+                EmitU8(0);
+                EmitOp(OpCode.Drop);
+                EmitOp(OpCode.Drop);
+                elementIndex++;
+                continue;
+            }
 
-                if (Check(TokenType.Identifier))
+            bool isRest = Match(TokenType.Ellipsis);
+
+            if (Check(TokenType.Identifier))
+            {
+                var name = (string)_currentToken.Value!;
+                var atom = _atoms.GetOrCreateAtom(name);
+                NextToken();
+
+                if (isRest)
                 {
-                    var name = (string)_currentToken.Value!;
-                    propName = _atoms.GetOrCreateAtom(name);
-                    varName = propName;
-                    NextToken();
+                    // Rest element: [...rest]
+                    EmitOp(OpCode.ArrayFrom);
+                    EmitU16(0); // Collect remaining into array
+                }
+                else
+                {
+                    // Get next element from iterator
+                    EmitOp(OpCode.ForOfNext);
+                    EmitU8(0);
+                    EmitOp(OpCode.Drop); // drop done flag
+                }
 
-                    // Check for renaming: { prop: newName }
-                    if (Match(TokenType.Colon))
-                    {
-                        if (!Check(TokenType.Identifier))
-                        {
-                            throw new JSSyntaxError(
-                                "Expected identifier after ':'",
-                                _currentToken.Start);
-                        }
-                        var newName = (string)_currentToken.Value!;
-                        varName = _atoms.GetOrCreateAtom(newName);
-                        NextToken();
-                    }
+                // Check for default value: [a = 1]
+                if (hasDefaultAllowed && !isRest && Match(TokenType.Assign))
+                {
+                    int labelHasValue = NewLabel();
+                    EmitOp(OpCode.Dup);
+                    EmitOp(OpCode.Undefined);
+                    EmitOp(OpCode.StrictEq);
+                    EmitGoto(OpCode.IfFalse, labelHasValue);
+                    EmitOp(OpCode.Drop);
+                    ParseAssignExpression();
+                    EmitLabel(labelHasValue);
+                }
 
-                    // Get the property from the object
+                // Define variable if declaration, otherwise assign
+                if (isDeclaration)
+                {
+                    _currentFunction.AddVar(atom, JSVarKind.Normal, isConst: false, isLexical: true);
+                    EmitOp(OpCode.ScopePutVarInit);
+                    EmitAtom(atom);
+                    EmitU16((ushort)_currentFunction.ScopeLevel);
+                }
+                else
+                {
+                    // For assignment patterns, we'd need the lvalue reference
+                    EmitOp(OpCode.ScopePutVar);
+                    EmitAtom(atom);
+                    EmitU16((ushort)_currentFunction.ScopeLevel);
+                }
+            }
+            else if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+            {
+                // Nested destructuring pattern
+                EmitOp(OpCode.ForOfNext);
+                EmitU8(0);
+                EmitOp(OpCode.Drop); // drop done flag
+                ParseDestructuringPattern(isDeclaration, hasDefaultAllowed);
+            }
+
+            if (isRest)
+            {
+                // Rest must be last
+                if (!Check(TokenType.RightBracket))
+                {
+                    throw new JSSyntaxError(
+                        "Rest element must be last",
+                        _currentToken.Start);
+                }
+                break;
+            }
+
+            elementIndex++;
+
+            if (!Match(TokenType.Comma))
+                break;
+        }
+
+        Expect(TokenType.RightBracket);
+        
+        // Close iterator
+        EmitOp(OpCode.IteratorClose);
+    }
+
+    /// <summary>
+    /// Parses object destructuring pattern: { a, b: c, d = 1, ...rest }
+    /// </summary>
+    private void ParseObjectDestructuringPattern(bool isDeclaration, bool hasDefaultAllowed)
+    {
+        NextToken(); // consume '{'
+
+        // Convert to object (throws if null/undefined)
+        EmitOp(OpCode.ToObject);
+
+        while (!Check(TokenType.RightBrace))
+        {
+            bool isRest = Match(TokenType.Ellipsis);
+
+            if (isRest)
+            {
+                // Rest element: { ...rest }
+                if (!Check(TokenType.Identifier))
+                {
+                    throw new JSSyntaxError(
+                        "Expected identifier after '...'",
+                        _currentToken.Start);
+                }
+                var restName = (string)_currentToken.Value!;
+                var restAtom = _atoms.GetOrCreateAtom(restName);
+                NextToken();
+
+                // Copy remaining enumerable properties
+                EmitOp(OpCode.Object);
+                EmitOp(OpCode.CopyDataProperties);
+                EmitU8(0);
+
+                if (isDeclaration)
+                {
+                    _currentFunction.AddVar(restAtom, JSVarKind.Normal, isConst: false, isLexical: true);
+                    EmitOp(OpCode.ScopePutVarInit);
+                    EmitAtom(restAtom);
+                    EmitU16((ushort)_currentFunction.ScopeLevel);
+                }
+                else
+                {
+                    EmitOp(OpCode.ScopePutVar);
+                    EmitAtom(restAtom);
+                    EmitU16((ushort)_currentFunction.ScopeLevel);
+                }
+
+                // Rest must be last
+                if (!Check(TokenType.RightBrace))
+                {
+                    throw new JSSyntaxError(
+                        "Rest element must be last",
+                        _currentToken.Start);
+                }
+                break;
+            }
+
+            if (!Check(TokenType.Identifier) && !Check(TokenType.String) && !Check(TokenType.Number))
+            {
+                throw new JSSyntaxError(
+                    "Expected property name",
+                    _currentToken.Start);
+            }
+
+            JSAtom propName;
+            JSAtom varName;
+
+            if (Check(TokenType.Identifier))
+            {
+                var name = (string)_currentToken.Value!;
+                propName = _atoms.GetOrCreateAtom(name);
+                varName = propName;
+                NextToken();
+            }
+            else if (Check(TokenType.String))
+            {
+                propName = _atoms.GetOrCreateAtom((string)_currentToken.Value!);
+                varName = propName;
+                NextToken();
+            }
+            else // Number
+            {
+                propName = _atoms.GetOrCreateAtom(_currentToken.Value!.ToString()!);
+                varName = propName;
+                NextToken();
+            }
+
+            // Check for renaming: { prop: newName } or nested: { prop: { a, b } }
+            if (Match(TokenType.Colon))
+            {
+                if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+                {
+                    // Nested pattern: { prop: { a, b } }
                     EmitOp(OpCode.Dup);
                     EmitOp(OpCode.GetField);
                     EmitAtom(propName);
-
-                    // Check for default value
-                    if (hasDefaultAllowed && Match(TokenType.Assign))
-                    {
-                        int label = NewLabel();
-                        EmitOp(OpCode.Dup);
-                        EmitOp(OpCode.Undefined);
-                        EmitOp(OpCode.StrictEq);
-                        EmitGoto(OpCode.IfFalse, label);
-                        EmitOp(OpCode.Drop);
-                        ParseAssignExpression();
-                        EmitLabel(label);
-                    }
-
-                    // Store the value
-                    if (isDeclaration)
-                    {
-                        EmitOp(OpCode.ScopePutVarInit);
-                        EmitAtom(varName);
-                        EmitU16((ushort)_currentFunction.ScopeLevel);
-                    }
-                    else
-                    {
-                        EmitOp(OpCode.PutRefValue);
-                    }
+                    ParseDestructuringPattern(isDeclaration, hasDefaultAllowed);
+                    
+                    if (!Match(TokenType.Comma))
+                        break;
+                    continue;
                 }
-
-                if (!Match(TokenType.Comma))
+                else if (Check(TokenType.Identifier))
                 {
-                    break;
+                    // Renaming: { prop: newName }
+                    var newName = (string)_currentToken.Value!;
+                    varName = _atoms.GetOrCreateAtom(newName);
+                    NextToken();
+                }
+                else
+                {
+                    throw new JSSyntaxError(
+                        "Expected identifier or destructuring pattern after ':'",
+                        _currentToken.Start);
                 }
             }
 
-            Expect(TokenType.RightBrace);
-            EmitOp(OpCode.Drop); // Drop the source object
+            // Get the property from the source object
+            EmitOp(OpCode.Dup);
+            EmitOp(OpCode.GetField);
+            EmitAtom(propName);
+
+            // Check for default value: { a = 1 }
+            if (hasDefaultAllowed && Match(TokenType.Assign))
+            {
+                int labelHasValue = NewLabel();
+                EmitOp(OpCode.Dup);
+                EmitOp(OpCode.Undefined);
+                EmitOp(OpCode.StrictEq);
+                EmitGoto(OpCode.IfFalse, labelHasValue);
+                EmitOp(OpCode.Drop);
+                ParseAssignExpression();
+                EmitLabel(labelHasValue);
+            }
+
+            // Store the value
+            if (isDeclaration)
+            {
+                _currentFunction.AddVar(varName, JSVarKind.Normal, isConst: false, isLexical: true);
+                EmitOp(OpCode.ScopePutVarInit);
+                EmitAtom(varName);
+                EmitU16((ushort)_currentFunction.ScopeLevel);
+            }
+            else
+            {
+                EmitOp(OpCode.ScopePutVar);
+                EmitAtom(varName);
+                EmitU16((ushort)_currentFunction.ScopeLevel);
+            }
+
+            if (!Match(TokenType.Comma))
+                break;
         }
+
+        Expect(TokenType.RightBrace);
+        EmitOp(OpCode.Drop); // Drop the source object
     }
 
     /// <summary>

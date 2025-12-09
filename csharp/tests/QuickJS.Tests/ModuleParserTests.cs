@@ -5,7 +5,7 @@ using Xunit;
 namespace QuickJS.Tests;
 
 /// <summary>
-/// Tests for ES module parsing (import/export declarations).
+/// Tests for ES module parsing (import/export declarations).McpServerTool
 /// 
 /// ES modules are the official JavaScript module system introduced in ES2015.
 /// The parser must handle various import/export syntaxes.
