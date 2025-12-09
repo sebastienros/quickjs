@@ -743,6 +743,17 @@ public class JSObject
     }
 
     /// <summary>
+    /// Tries to get the property descriptor for an own property.
+    /// </summary>
+    /// <param name="propertyName">The name of the property.</param>
+    /// <param name="descriptor">When this method returns, contains the descriptor if found.</param>
+    /// <returns>True if the property exists on this object (not inherited).</returns>
+    public bool TryGetOwnPropertyDescriptor(string propertyName, out PropertyDescriptor descriptor)
+    {
+        return _properties.TryGetValue(propertyName, out descriptor!);
+    }
+
+    /// <summary>
     /// Gets the indices of all own indexed properties.
     /// </summary>
     /// <returns>An enumerable of property indices.</returns>

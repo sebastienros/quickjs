@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 
 namespace QuickJS;
 
@@ -711,6 +712,327 @@ public sealed class JSContext : IDisposable
             return JSValue.FromString($"[object {className}]");
         }
 
+        // Object.keys
+        JSValue ObjectKeys(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!arg.IsObject)
+                return ThrowTypeError("Object.keys called on non-object");
+            var obj = arg.AsObject();
+            var result = new JSObject(GetClassPrototype(JSClassId.Array), JSClassId.Array);
+            uint i = 0;
+            foreach (var kvp in obj.GetOwnProperties())
+            {
+                if (kvp.Value.IsEnumerable)
+                {
+                    result.Set(i++, JSValue.FromString(kvp.Key));
+                }
+            }
+            return JSValue.FromObject(result);
+        }
+
+        // Object.values
+        JSValue ObjectValues(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!arg.IsObject)
+                return ThrowTypeError("Object.values called on non-object");
+            var obj = arg.AsObject();
+            var result = new JSObject(GetClassPrototype(JSClassId.Array), JSClassId.Array);
+            uint i = 0;
+            foreach (var kvp in obj.GetOwnProperties())
+            {
+                if (kvp.Value.IsEnumerable)
+                {
+                    result.Set(i++, kvp.Value.Value);
+                }
+            }
+            return JSValue.FromObject(result);
+        }
+
+        // Object.entries
+        JSValue ObjectEntries(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!arg.IsObject)
+                return ThrowTypeError("Object.entries called on non-object");
+            var obj = arg.AsObject();
+            var result = new JSObject(GetClassPrototype(JSClassId.Array), JSClassId.Array);
+            uint i = 0;
+            foreach (var kvp in obj.GetOwnProperties())
+            {
+                if (kvp.Value.IsEnumerable)
+                {
+                    var entry = new JSObject(GetClassPrototype(JSClassId.Array), JSClassId.Array);
+                    entry.Set(0u, JSValue.FromString(kvp.Key));
+                    entry.Set(1u, kvp.Value.Value);
+                    result.Set(i++, JSValue.FromObject(entry));
+                }
+            }
+            return JSValue.FromObject(result);
+        }
+
+        // Object.assign
+        JSValue ObjectAssign(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length == 0)
+                return ThrowTypeError("Cannot convert undefined or null to object");
+            var target = args[0];
+            if (!target.IsObject)
+                return ThrowTypeError("Object.assign target must be an object");
+            var targetObj = target.AsObject();
+            for (int i = 1; i < args.Length; i++)
+            {
+                var src = args[i];
+                if (src.IsNull || src.IsUndefined)
+                    continue;
+                if (!src.IsObject)
+                    continue;
+                var srcObj = src.AsObject();
+                foreach (var kvp in srcObj.GetOwnProperties())
+                {
+                    if (kvp.Value.IsEnumerable)
+                    {
+                        targetObj.Set(kvp.Key, kvp.Value.Value);
+                    }
+                }
+            }
+            return target;
+        }
+
+        // Object.getPrototypeOf
+        JSValue ObjectGetPrototypeOf(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!arg.IsObject)
+                return ThrowTypeError("Object.getPrototypeOf called on non-object");
+            var proto = arg.AsObject().Prototype;
+            return proto != null ? JSValue.FromObject(proto) : JSValue.Null;
+        }
+
+        // Object.setPrototypeOf
+        JSValue ObjectSetPrototypeOf(JSValue thisVal, JSValue[] args)
+        {
+            var obj = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var proto = args.Length > 1 ? args[1] : JSValue.Undefined;
+            if (!obj.IsObject)
+                return ThrowTypeError("Object.setPrototypeOf called on non-object");
+            JSObject? protoObj = null;
+            if (proto.IsObject)
+                protoObj = proto.AsObject();
+            else if (!proto.IsNull)
+                return ThrowTypeError("Object prototype may only be an Object or null");
+            if (!obj.AsObject().SetPrototype(protoObj))
+                return ThrowTypeError("Cannot set prototype");
+            return obj;
+        }
+
+        // Object.is (SameValue comparison)
+        JSValue ObjectIs(JSValue thisVal, JSValue[] args)
+        {
+            var x = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var y = args.Length > 1 ? args[1] : JSValue.Undefined;
+            return JSValue.FromBoolean(JSValueConversion.SameValue(x, y));
+        }
+
+        // Object.freeze
+        JSValue ObjectFreeze(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!arg.IsObject)
+                return arg; // Primitives are returned as-is in ES6
+            arg.AsObject().Freeze();
+            return arg;
+        }
+
+        // Object.seal
+        JSValue ObjectSeal(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!arg.IsObject)
+                return arg; // Primitives are returned as-is
+            arg.AsObject().Seal();
+            return arg;
+        }
+
+        // Object.preventExtensions
+        JSValue ObjectPreventExtensions(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!arg.IsObject)
+                return arg;
+            arg.AsObject().PreventExtensions();
+            return arg;
+        }
+
+        // Object.isExtensible
+        JSValue ObjectIsExtensible(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!arg.IsObject)
+                return JSValue.False;
+            return JSValue.FromBoolean(arg.AsObject().IsExtensible);
+        }
+
+        // Object.isFrozen
+        JSValue ObjectIsFrozen(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!arg.IsObject)
+                return JSValue.True; // Primitives are considered frozen
+            return JSValue.FromBoolean(arg.AsObject().IsFrozen);
+        }
+
+        // Object.isSealed
+        JSValue ObjectIsSealed(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!arg.IsObject)
+                return JSValue.True; // Primitives are considered sealed
+            return JSValue.FromBoolean(arg.AsObject().IsSealed);
+        }
+
+        // Object.fromEntries
+        JSValue ObjectFromEntries(JSValue thisVal, JSValue[] args)
+        {
+            var iterable = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!iterable.IsObject)
+                return ThrowTypeError("Object.fromEntries requires an iterable");
+            var result = new JSObject(objectProto, JSClassId.Object);
+            var arr = iterable.AsObject();
+            // Simple array-like iteration
+            var length = arr.Get("length");
+            if (length.IsNumber)
+            {
+                var len = length.ToInt32();
+                for (int i = 0; i < len; i++)
+                {
+                    var entry = arr.Get((uint)i);
+                    if (entry.IsObject)
+                    {
+                        var entryObj = entry.AsObject();
+                        var key = JSValueConversion.ToString(entryObj.Get(0));
+                        var value = entryObj.Get(1);
+                        result.Set(key, value);
+                    }
+                }
+            }
+            return JSValue.FromObject(result);
+        }
+
+        // Object.hasOwn (ES2022)
+        JSValue ObjectHasOwn(JSValue thisVal, JSValue[] args)
+        {
+            var obj = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var key = args.Length > 1 ? JSValueConversion.ToString(args[1]) : "";
+            if (!obj.IsObject)
+                return ThrowTypeError("Object.hasOwn called on non-object");
+            return JSValue.FromBoolean(obj.AsObject().HasOwnProperty(key));
+        }
+
+        // Object.getOwnPropertyNames
+        JSValue ObjectGetOwnPropertyNames(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!arg.IsObject)
+                return ThrowTypeError("Object.getOwnPropertyNames called on non-object");
+            var obj = arg.AsObject();
+            var result = new JSObject(GetClassPrototype(JSClassId.Array), JSClassId.Array);
+            uint i = 0;
+            foreach (var name in obj.GetOwnPropertyNames())
+            {
+                result.Set(i++, JSValue.FromString(name));
+            }
+            return JSValue.FromObject(result);
+        }
+
+        // Object.getOwnPropertyDescriptor
+        JSValue ObjectGetOwnPropertyDescriptor(JSValue thisVal, JSValue[] args)
+        {
+            var obj = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var key = args.Length > 1 ? JSValueConversion.ToString(args[1]) : "";
+            if (!obj.IsObject)
+                return ThrowTypeError("Object.getOwnPropertyDescriptor called on non-object");
+            var targetObj = obj.AsObject();
+            if (!targetObj.TryGetOwnPropertyDescriptor(key, out var desc))
+                return JSValue.Undefined;
+            // Return a descriptor object
+            var descObj = new JSObject(objectProto, JSClassId.Object);
+            descObj.Set("value", desc.Value);
+            descObj.Set("writable", JSValue.FromBoolean(desc.IsWritable));
+            descObj.Set("enumerable", JSValue.FromBoolean(desc.IsEnumerable));
+            descObj.Set("configurable", JSValue.FromBoolean(desc.IsConfigurable));
+            return JSValue.FromObject(descObj);
+        }
+
+        // Object.defineProperty
+        JSValue ObjectDefineProperty(JSValue thisVal, JSValue[] args)
+        {
+            var obj = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var key = args.Length > 1 ? JSValueConversion.ToString(args[1]) : "";
+            var desc = args.Length > 2 ? args[2] : JSValue.Undefined;
+            if (!obj.IsObject)
+                return ThrowTypeError("Object.defineProperty called on non-object");
+            if (!desc.IsObject)
+                return ThrowTypeError("Property descriptor must be an object");
+            var targetObj = obj.AsObject();
+            var descObj = desc.AsObject();
+            
+            var value = descObj.Get("value");
+            var writableVal = descObj.Get("writable");
+            var enumerableVal = descObj.Get("enumerable");
+            var configurableVal = descObj.Get("configurable");
+            
+            var flags = PropertyFlags.None;
+            if (!writableVal.IsUndefined && writableVal.IsTrue)
+                flags |= PropertyFlags.Writable;
+            if (!enumerableVal.IsUndefined && enumerableVal.IsTrue)
+                flags |= PropertyFlags.Enumerable;
+            if (!configurableVal.IsUndefined && configurableVal.IsTrue)
+                flags |= PropertyFlags.Configurable;
+            
+            var propDesc = PropertyDescriptor.Data(value, flags);
+            targetObj.DefineProperty(key, propDesc);
+            return obj;
+        }
+
+        // Object.prototype.valueOf
+        JSValue ObjectProtoValueOf(JSValue thisVal, JSValue[] args)
+        {
+            return thisVal;
+        }
+
+        // Object.prototype.isPrototypeOf
+        JSValue ObjectProtoIsPrototypeOf(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject)
+                return JSValue.False;
+            var v = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (!v.IsObject)
+                return JSValue.False;
+            var o = thisVal.AsObject();
+            var current = v.AsObject().Prototype;
+            while (current != null)
+            {
+                if (ReferenceEquals(current, o))
+                    return JSValue.True;
+                current = current.Prototype;
+            }
+            return JSValue.False;
+        }
+
+        // Object.prototype.propertyIsEnumerable
+        JSValue ObjectProtoPropertyIsEnumerable(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject)
+                return JSValue.False;
+            var key = args.Length > 0 ? JSValueConversion.ToString(args[0]) : "";
+            var obj = thisVal.AsObject();
+            if (!obj.TryGetOwnPropertyDescriptor(key, out var desc))
+                return JSValue.False;
+            return JSValue.FromBoolean(desc.IsEnumerable);
+        }
+
         // Constructor.prototype
         objectCtorFunc.Set("prototype", JSValue.FromObject(objectProto));
 
@@ -718,12 +1040,33 @@ public sealed class JSContext : IDisposable
         _globalObject.Set("Object", JSValue.FromObject(objectCtorFunc));
 
         // Attach Object static methods
-        objectCtorFunc.Set("create", JSValue.FromObject(new JSFunction(ObjectCreate, "create", 1, functionProto)));
+        objectCtorFunc.Set("create", JSValue.FromObject(new JSFunction(ObjectCreate, "create", 2, functionProto)));
+        objectCtorFunc.Set("keys", JSValue.FromObject(new JSFunction(ObjectKeys, "keys", 1, functionProto)));
+        objectCtorFunc.Set("values", JSValue.FromObject(new JSFunction(ObjectValues, "values", 1, functionProto)));
+        objectCtorFunc.Set("entries", JSValue.FromObject(new JSFunction(ObjectEntries, "entries", 1, functionProto)));
+        objectCtorFunc.Set("assign", JSValue.FromObject(new JSFunction(ObjectAssign, "assign", 2, functionProto)));
+        objectCtorFunc.Set("getPrototypeOf", JSValue.FromObject(new JSFunction(ObjectGetPrototypeOf, "getPrototypeOf", 1, functionProto)));
+        objectCtorFunc.Set("setPrototypeOf", JSValue.FromObject(new JSFunction(ObjectSetPrototypeOf, "setPrototypeOf", 2, functionProto)));
+        objectCtorFunc.Set("is", JSValue.FromObject(new JSFunction(ObjectIs, "is", 2, functionProto)));
+        objectCtorFunc.Set("freeze", JSValue.FromObject(new JSFunction(ObjectFreeze, "freeze", 1, functionProto)));
+        objectCtorFunc.Set("seal", JSValue.FromObject(new JSFunction(ObjectSeal, "seal", 1, functionProto)));
+        objectCtorFunc.Set("preventExtensions", JSValue.FromObject(new JSFunction(ObjectPreventExtensions, "preventExtensions", 1, functionProto)));
+        objectCtorFunc.Set("isExtensible", JSValue.FromObject(new JSFunction(ObjectIsExtensible, "isExtensible", 1, functionProto)));
+        objectCtorFunc.Set("isFrozen", JSValue.FromObject(new JSFunction(ObjectIsFrozen, "isFrozen", 1, functionProto)));
+        objectCtorFunc.Set("isSealed", JSValue.FromObject(new JSFunction(ObjectIsSealed, "isSealed", 1, functionProto)));
+        objectCtorFunc.Set("fromEntries", JSValue.FromObject(new JSFunction(ObjectFromEntries, "fromEntries", 1, functionProto)));
+        objectCtorFunc.Set("hasOwn", JSValue.FromObject(new JSFunction(ObjectHasOwn, "hasOwn", 2, functionProto)));
+        objectCtorFunc.Set("getOwnPropertyNames", JSValue.FromObject(new JSFunction(ObjectGetOwnPropertyNames, "getOwnPropertyNames", 1, functionProto)));
+        objectCtorFunc.Set("getOwnPropertyDescriptor", JSValue.FromObject(new JSFunction(ObjectGetOwnPropertyDescriptor, "getOwnPropertyDescriptor", 2, functionProto)));
+        objectCtorFunc.Set("defineProperty", JSValue.FromObject(new JSFunction(ObjectDefineProperty, "defineProperty", 3, functionProto)));
 
         // Attach prototype methods
         objectProto.Set("constructor", JSValue.FromObject(objectCtorFunc));
         objectProto.Set("hasOwnProperty", JSValue.FromObject(new JSFunction(HasOwnProperty, "hasOwnProperty", 1, functionProto)));
         objectProto.Set("toString", JSValue.FromObject(new JSFunction(ObjectProtoToString, "toString", 0, functionProto)));
+        objectProto.Set("valueOf", JSValue.FromObject(new JSFunction(ObjectProtoValueOf, "valueOf", 0, functionProto)));
+        objectProto.Set("isPrototypeOf", JSValue.FromObject(new JSFunction(ObjectProtoIsPrototypeOf, "isPrototypeOf", 1, functionProto)));
+        objectProto.Set("propertyIsEnumerable", JSValue.FromObject(new JSFunction(ObjectProtoPropertyIsEnumerable, "propertyIsEnumerable", 1, functionProto)));
     }
 
     private void InitializeFunctionConstructor()
@@ -844,16 +1187,60 @@ public sealed class JSContext : IDisposable
         // Math constants
         mathObj.Set("PI", JSValue.FromDouble(Math.PI));
         mathObj.Set("E", JSValue.FromDouble(Math.E));
+        mathObj.Set("LN10", JSValue.FromDouble(Math.Log(10)));
+        mathObj.Set("LN2", JSValue.FromDouble(Math.Log(2)));
+        mathObj.Set("LOG2E", JSValue.FromDouble(1.0 / Math.Log(2)));
+        mathObj.Set("LOG10E", JSValue.FromDouble(1.0 / Math.Log(10)));
+        mathObj.Set("SQRT1_2", JSValue.FromDouble(Math.Sqrt(0.5)));
+        mathObj.Set("SQRT2", JSValue.FromDouble(Math.Sqrt(2)));
 
-        // Math functions (subset)
+        // Math functions
         AddMathFunc("abs", 1, xs => Math.Abs(xs.Length > 0 ? xs[0] : double.NaN));
         AddMathFunc("floor", 1, xs => Math.Floor(xs.Length > 0 ? xs[0] : double.NaN));
         AddMathFunc("ceil", 1, xs => Math.Ceiling(xs.Length > 0 ? xs[0] : double.NaN));
-        AddMathFunc("round", 1, xs => Math.Round(xs.Length > 0 ? xs[0] : double.NaN));
+        AddMathFunc("round", 1, xs => Math.Round(xs.Length > 0 ? xs[0] : double.NaN, MidpointRounding.AwayFromZero));
         AddMathFunc("max", 2, xs => xs.Length == 0 ? double.NegativeInfinity : xs.Max());
         AddMathFunc("min", 2, xs => xs.Length == 0 ? double.PositiveInfinity : xs.Min());
         AddMathFunc("pow", 2, xs => xs.Length >= 2 ? Math.Pow(xs[0], xs[1]) : double.NaN);
         AddMathFunc("sqrt", 1, xs => xs.Length > 0 ? Math.Sqrt(xs[0]) : double.NaN);
+        AddMathFunc("sin", 1, xs => xs.Length > 0 ? Math.Sin(xs[0]) : double.NaN);
+        AddMathFunc("cos", 1, xs => xs.Length > 0 ? Math.Cos(xs[0]) : double.NaN);
+        AddMathFunc("tan", 1, xs => xs.Length > 0 ? Math.Tan(xs[0]) : double.NaN);
+        AddMathFunc("asin", 1, xs => xs.Length > 0 ? Math.Asin(xs[0]) : double.NaN);
+        AddMathFunc("acos", 1, xs => xs.Length > 0 ? Math.Acos(xs[0]) : double.NaN);
+        AddMathFunc("atan", 1, xs => xs.Length > 0 ? Math.Atan(xs[0]) : double.NaN);
+        AddMathFunc("atan2", 2, xs => xs.Length >= 2 ? Math.Atan2(xs[0], xs[1]) : double.NaN);
+        AddMathFunc("exp", 1, xs => xs.Length > 0 ? Math.Exp(xs[0]) : double.NaN);
+        AddMathFunc("log", 1, xs => xs.Length > 0 ? Math.Log(xs[0]) : double.NaN);
+        AddMathFunc("log2", 1, xs => xs.Length > 0 ? Math.Log(xs[0]) / Math.Log(2) : double.NaN);
+        AddMathFunc("log10", 1, xs => xs.Length > 0 ? Math.Log10(xs[0]) : double.NaN);
+        AddMathFunc("sinh", 1, xs => xs.Length > 0 ? Math.Sinh(xs[0]) : double.NaN);
+        AddMathFunc("cosh", 1, xs => xs.Length > 0 ? Math.Cosh(xs[0]) : double.NaN);
+        AddMathFunc("tanh", 1, xs => xs.Length > 0 ? Math.Tanh(xs[0]) : double.NaN);
+        AddMathFunc("asinh", 1, xs => xs.Length > 0 ? Math.Log(xs[0] + Math.Sqrt(xs[0] * xs[0] + 1)) : double.NaN);
+        AddMathFunc("acosh", 1, xs => xs.Length > 0 ? Math.Log(xs[0] + Math.Sqrt(xs[0] * xs[0] - 1)) : double.NaN);
+        AddMathFunc("atanh", 1, xs => xs.Length > 0 ? 0.5 * Math.Log((1 + xs[0]) / (1 - xs[0])) : double.NaN);
+        AddMathFunc("expm1", 1, xs => xs.Length > 0 ? Math.Exp(xs[0]) - 1 : double.NaN);
+        AddMathFunc("log1p", 1, xs => xs.Length > 0 ? Math.Log(1 + xs[0]) : double.NaN);
+        AddMathFunc("cbrt", 1, xs => xs.Length > 0 ? Math.Pow(xs[0], 1.0 / 3.0) * Math.Sign(xs[0]) : double.NaN);
+        AddMathFunc("hypot", 2, xs => xs.Length >= 2 ? Math.Sqrt(xs[0] * xs[0] + xs[1] * xs[1]) : xs.Length == 1 ? Math.Abs(xs[0]) : 0);
+        AddMathFunc("trunc", 1, xs => xs.Length > 0 ? Math.Truncate(xs[0]) : double.NaN);
+        AddMathFunc("sign", 1, xs => xs.Length > 0 ? Math.Sign(xs[0]) : double.NaN);
+        AddMathFunc("fround", 1, xs => xs.Length > 0 ? (double)(float)xs[0] : double.NaN);
+        AddMathFunc("imul", 2, xs => xs.Length >= 2 ? (double)((int)xs[0] * (int)xs[1]) : 0);
+        AddMathFunc("clz32", 1, xs =>
+        {
+            if (xs.Length == 0) return 32;
+            uint n = (uint)xs[0];
+            if (n == 0) return 32;
+            int count = 0;
+            while ((n & 0x80000000) == 0)
+            {
+                count++;
+                n <<= 1;
+            }
+            return count;
+        });
         AddMathFunc("random", 0, xs =>
         {
             // Simple LCG for determinism
@@ -908,8 +1295,327 @@ public sealed class JSContext : IDisposable
             return ThrowTypeError("String.prototype.toString called on non-string");
         }
 
+        // Helper to get string from this value
+        string GetStringValue(JSValue thisVal)
+        {
+            if (thisVal.IsString)
+                return thisVal.ToString()!;
+            if (thisVal.IsObject && thisVal.AsObject().ClassId == JSClassId.String)
+                return thisVal.AsObject().InternalValue.ToString()!;
+            return JSValueConversion.ToString(thisVal);
+        }
+
+        // String.prototype.charAt
+        JSValue StringCharAt(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            int index = args.Length > 0 ? args[0].ToInt32() : 0;
+            if (index < 0 || index >= str.Length)
+                return JSValue.FromString("");
+            return JSValue.FromString(str[index].ToString());
+        }
+
+        // String.prototype.charCodeAt
+        JSValue StringCharCodeAt(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            int index = args.Length > 0 ? args[0].ToInt32() : 0;
+            if (index < 0 || index >= str.Length)
+                return JSValue.FromDouble(double.NaN);
+            return JSValue.FromInt32(str[index]);
+        }
+
+        // String.prototype.concat
+        JSValue StringConcat(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            foreach (var arg in args)
+            {
+                str += JSValueConversion.ToString(arg);
+            }
+            return JSValue.FromString(str);
+        }
+
+        // String.prototype.indexOf
+        JSValue StringIndexOf(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            var searchStr = args.Length > 0 ? JSValueConversion.ToString(args[0]) : "undefined";
+            int position = args.Length > 1 ? args[1].ToInt32() : 0;
+            position = Math.Max(0, Math.Min(position, str.Length));
+            int idx = str.IndexOf(searchStr, position, StringComparison.Ordinal);
+            return JSValue.FromInt32(idx);
+        }
+
+        // String.prototype.lastIndexOf
+        JSValue StringLastIndexOf(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            var searchStr = args.Length > 0 ? JSValueConversion.ToString(args[0]) : "undefined";
+            int position = args.Length > 1 ? args[1].ToInt32() : str.Length;
+            position = Math.Max(0, Math.Min(position, str.Length));
+            if (position == 0 && searchStr.Length > 0)
+                return JSValue.FromInt32(-1);
+            int idx = str.LastIndexOf(searchStr, Math.Min(position + searchStr.Length - 1, str.Length - 1), StringComparison.Ordinal);
+            return JSValue.FromInt32(idx);
+        }
+
+        // String.prototype.includes
+        JSValue StringIncludes(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            var searchStr = args.Length > 0 ? JSValueConversion.ToString(args[0]) : "undefined";
+            int position = args.Length > 1 ? args[1].ToInt32() : 0;
+            position = Math.Max(0, Math.Min(position, str.Length));
+            return JSValue.FromBoolean(str.IndexOf(searchStr, position, StringComparison.Ordinal) >= 0);
+        }
+
+        // String.prototype.startsWith
+        JSValue StringStartsWith(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            var searchStr = args.Length > 0 ? JSValueConversion.ToString(args[0]) : "undefined";
+            int position = args.Length > 1 ? args[1].ToInt32() : 0;
+            position = Math.Max(0, Math.Min(position, str.Length));
+            if (position + searchStr.Length > str.Length)
+                return JSValue.False;
+            return JSValue.FromBoolean(str.Substring(position).StartsWith(searchStr, StringComparison.Ordinal));
+        }
+
+        // String.prototype.endsWith
+        JSValue StringEndsWith(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            var searchStr = args.Length > 0 ? JSValueConversion.ToString(args[0]) : "undefined";
+            int endPos = args.Length > 1 && !args[1].IsUndefined ? args[1].ToInt32() : str.Length;
+            endPos = Math.Max(0, Math.Min(endPos, str.Length));
+            if (searchStr.Length > endPos)
+                return JSValue.False;
+            return JSValue.FromBoolean(str.Substring(0, endPos).EndsWith(searchStr, StringComparison.Ordinal));
+        }
+
+        // String.prototype.slice
+        JSValue StringSlice(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            int len = str.Length;
+            int start = args.Length > 0 ? args[0].ToInt32() : 0;
+            int end = args.Length > 1 && !args[1].IsUndefined ? args[1].ToInt32() : len;
+            if (start < 0) start = Math.Max(len + start, 0);
+            if (end < 0) end = Math.Max(len + end, 0);
+            start = Math.Min(start, len);
+            end = Math.Min(end, len);
+            if (end <= start) return JSValue.FromString("");
+            return JSValue.FromString(str.Substring(start, end - start));
+        }
+
+        // String.prototype.substring
+        JSValue StringSubstring(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            int len = str.Length;
+            int start = args.Length > 0 ? args[0].ToInt32() : 0;
+            int end = args.Length > 1 && !args[1].IsUndefined ? args[1].ToInt32() : len;
+            start = Math.Max(0, Math.Min(start, len));
+            end = Math.Max(0, Math.Min(end, len));
+            if (start > end) (start, end) = (end, start);
+            return JSValue.FromString(str.Substring(start, end - start));
+        }
+
+        // String.prototype.substr (deprecated but still supported)
+        JSValue StringSubstr(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            int len = str.Length;
+            int start = args.Length > 0 ? args[0].ToInt32() : 0;
+            if (start < 0) start = Math.Max(len + start, 0);
+            int length = args.Length > 1 && !args[1].IsUndefined ? args[1].ToInt32() : len - start;
+            if (length <= 0 || start >= len) return JSValue.FromString("");
+            length = Math.Min(length, len - start);
+            return JSValue.FromString(str.Substring(start, length));
+        }
+
+        // String.prototype.toLowerCase
+        JSValue StringToLowerCase(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            return JSValue.FromString(str.ToLowerInvariant());
+        }
+
+        // String.prototype.toUpperCase
+        JSValue StringToUpperCase(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            return JSValue.FromString(str.ToUpperInvariant());
+        }
+
+        // String.prototype.trim
+        JSValue StringTrim(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            return JSValue.FromString(str.Trim());
+        }
+
+        // String.prototype.trimStart
+        JSValue StringTrimStart(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            return JSValue.FromString(str.TrimStart());
+        }
+
+        // String.prototype.trimEnd
+        JSValue StringTrimEnd(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            return JSValue.FromString(str.TrimEnd());
+        }
+
+        // String.prototype.split
+        JSValue StringSplit(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            var separator = args.Length > 0 ? args[0] : JSValue.Undefined;
+            int limit = args.Length > 1 && !args[1].IsUndefined ? (int)JSValueConversion.ToNumber(args[1]) : int.MaxValue;
+            
+            var result = new JSObject(GetClassPrototype(JSClassId.Array), JSClassId.Array);
+            if (separator.IsUndefined)
+            {
+                result.Set(0u, JSValue.FromString(str));
+                return JSValue.FromObject(result);
+            }
+            
+            var sepStr = JSValueConversion.ToString(separator);
+            string[] parts;
+            if (string.IsNullOrEmpty(sepStr))
+            {
+                // Split into individual characters
+                parts = new string[str.Length];
+                for (int j = 0; j < str.Length; j++)
+                    parts[j] = str[j].ToString();
+            }
+            else
+            {
+                parts = str.Split(new[] { sepStr }, StringSplitOptions.None);
+            }
+            
+            uint idx = 0;
+            foreach (var part in parts)
+            {
+                if (idx >= limit) break;
+                result.Set(idx++, JSValue.FromString(part));
+            }
+            return JSValue.FromObject(result);
+        }
+
+        // String.prototype.repeat
+        JSValue StringRepeat(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            int count = args.Length > 0 ? args[0].ToInt32() : 0;
+            if (count < 0)
+                return ThrowRangeError("Invalid count value");
+            if (count == 0 || str.Length == 0)
+                return JSValue.FromString("");
+            return JSValue.FromString(string.Concat(Enumerable.Repeat(str, count)));
+        }
+
+        // String.prototype.padStart
+        JSValue StringPadStart(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            int targetLen = args.Length > 0 ? args[0].ToInt32() : 0;
+            if (targetLen <= str.Length)
+                return JSValue.FromString(str);
+            var padStr = args.Length > 1 && !args[1].IsUndefined ? JSValueConversion.ToString(args[1]) : " ";
+            if (string.IsNullOrEmpty(padStr))
+                return JSValue.FromString(str);
+            int padLen = targetLen - str.Length;
+            var pad = string.Concat(Enumerable.Repeat(padStr, (padLen / padStr.Length) + 1)).Substring(0, padLen);
+            return JSValue.FromString(pad + str);
+        }
+
+        // String.prototype.padEnd
+        JSValue StringPadEnd(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            int targetLen = args.Length > 0 ? args[0].ToInt32() : 0;
+            if (targetLen <= str.Length)
+                return JSValue.FromString(str);
+            var padStr = args.Length > 1 && !args[1].IsUndefined ? JSValueConversion.ToString(args[1]) : " ";
+            if (string.IsNullOrEmpty(padStr))
+                return JSValue.FromString(str);
+            int padLen = targetLen - str.Length;
+            var pad = string.Concat(Enumerable.Repeat(padStr, (padLen / padStr.Length) + 1)).Substring(0, padLen);
+            return JSValue.FromString(str + pad);
+        }
+
+        // String.prototype.at (ES2022)
+        JSValue StringAt(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            int index = args.Length > 0 ? args[0].ToInt32() : 0;
+            if (index < 0) index = str.Length + index;
+            if (index < 0 || index >= str.Length)
+                return JSValue.Undefined;
+            return JSValue.FromString(str[index].ToString());
+        }
+
+        // String.prototype.replace (simple, non-regex)
+        JSValue StringReplace(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            if (args.Length < 2)
+                return JSValue.FromString(str);
+            var searchValue = JSValueConversion.ToString(args[0]);
+            var replaceValue = JSValueConversion.ToString(args[1]);
+            int idx = str.IndexOf(searchValue, StringComparison.Ordinal);
+            if (idx < 0)
+                return JSValue.FromString(str);
+            return JSValue.FromString(str.Substring(0, idx) + replaceValue + str.Substring(idx + searchValue.Length));
+        }
+
+        // String.prototype.replaceAll
+        JSValue StringReplaceAll(JSValue thisVal, JSValue[] args)
+        {
+            var str = GetStringValue(thisVal);
+            if (args.Length < 2)
+                return JSValue.FromString(str);
+            var searchValue = JSValueConversion.ToString(args[0]);
+            var replaceValue = JSValueConversion.ToString(args[1]);
+            if (string.IsNullOrEmpty(searchValue))
+                return JSValue.FromString(str);
+            return JSValue.FromString(str.Replace(searchValue, replaceValue));
+        }
+
         stringProto.Set("toString", JSValue.FromObject(new JSFunction(StringProtoToString, "toString", 0, functionProto)));
         stringProto.Set("valueOf", JSValue.FromObject(new JSFunction(StringProtoToString, "valueOf", 0, functionProto)));
+        stringProto.Set("charAt", JSValue.FromObject(new JSFunction(StringCharAt, "charAt", 1, functionProto)));
+        stringProto.Set("charCodeAt", JSValue.FromObject(new JSFunction(StringCharCodeAt, "charCodeAt", 1, functionProto)));
+        stringProto.Set("concat", JSValue.FromObject(new JSFunction(StringConcat, "concat", 1, functionProto)));
+        stringProto.Set("indexOf", JSValue.FromObject(new JSFunction(StringIndexOf, "indexOf", 1, functionProto)));
+        stringProto.Set("lastIndexOf", JSValue.FromObject(new JSFunction(StringLastIndexOf, "lastIndexOf", 1, functionProto)));
+        stringProto.Set("includes", JSValue.FromObject(new JSFunction(StringIncludes, "includes", 1, functionProto)));
+        stringProto.Set("startsWith", JSValue.FromObject(new JSFunction(StringStartsWith, "startsWith", 1, functionProto)));
+        stringProto.Set("endsWith", JSValue.FromObject(new JSFunction(StringEndsWith, "endsWith", 1, functionProto)));
+        stringProto.Set("slice", JSValue.FromObject(new JSFunction(StringSlice, "slice", 2, functionProto)));
+        stringProto.Set("substring", JSValue.FromObject(new JSFunction(StringSubstring, "substring", 2, functionProto)));
+        stringProto.Set("substr", JSValue.FromObject(new JSFunction(StringSubstr, "substr", 2, functionProto)));
+        stringProto.Set("toLowerCase", JSValue.FromObject(new JSFunction(StringToLowerCase, "toLowerCase", 0, functionProto)));
+        stringProto.Set("toUpperCase", JSValue.FromObject(new JSFunction(StringToUpperCase, "toUpperCase", 0, functionProto)));
+        stringProto.Set("toLocaleLowerCase", JSValue.FromObject(new JSFunction(StringToLowerCase, "toLocaleLowerCase", 0, functionProto)));
+        stringProto.Set("toLocaleUpperCase", JSValue.FromObject(new JSFunction(StringToUpperCase, "toLocaleUpperCase", 0, functionProto)));
+        stringProto.Set("trim", JSValue.FromObject(new JSFunction(StringTrim, "trim", 0, functionProto)));
+        stringProto.Set("trimStart", JSValue.FromObject(new JSFunction(StringTrimStart, "trimStart", 0, functionProto)));
+        stringProto.Set("trimEnd", JSValue.FromObject(new JSFunction(StringTrimEnd, "trimEnd", 0, functionProto)));
+        stringProto.Set("trimLeft", JSValue.FromObject(new JSFunction(StringTrimStart, "trimLeft", 0, functionProto)));
+        stringProto.Set("trimRight", JSValue.FromObject(new JSFunction(StringTrimEnd, "trimRight", 0, functionProto)));
+        stringProto.Set("split", JSValue.FromObject(new JSFunction(StringSplit, "split", 2, functionProto)));
+        stringProto.Set("repeat", JSValue.FromObject(new JSFunction(StringRepeat, "repeat", 1, functionProto)));
+        stringProto.Set("padStart", JSValue.FromObject(new JSFunction(StringPadStart, "padStart", 1, functionProto)));
+        stringProto.Set("padEnd", JSValue.FromObject(new JSFunction(StringPadEnd, "padEnd", 1, functionProto)));
+        stringProto.Set("at", JSValue.FromObject(new JSFunction(StringAt, "at", 1, functionProto)));
+        stringProto.Set("replace", JSValue.FromObject(new JSFunction(StringReplace, "replace", 2, functionProto)));
+        stringProto.Set("replaceAll", JSValue.FromObject(new JSFunction(StringReplaceAll, "replaceAll", 2, functionProto)));
 
         _globalObject.Set("String", JSValue.FromObject(stringCtor));
     }
@@ -974,8 +1680,565 @@ public sealed class JSContext : IDisposable
             return arr.ArrayPop();
         }
 
+        // Array.prototype.shift
+        JSValue ArrayShift(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.shift called on non-array");
+            var arr = thisVal.AsObject();
+            var len = arr.ArrayLength;
+            if (len == 0) return JSValue.Undefined;
+            var first = arr.Get(0u);
+            for (uint i = 1; i < len; i++)
+            {
+                arr.Set(i - 1, arr.Get(i));
+            }
+            arr.SetArrayLength(len - 1);
+            return first;
+        }
+
+        // Array.prototype.unshift
+        JSValue ArrayUnshift(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.unshift called on non-array");
+            var arr = thisVal.AsObject();
+            var len = arr.ArrayLength;
+            var argCount = (uint)args.Length;
+            // Shift existing elements
+            for (uint i = len; i > 0; i--)
+            {
+                arr.Set(i - 1 + argCount, arr.Get(i - 1));
+            }
+            // Insert new elements at the beginning
+            for (uint i = 0; i < argCount; i++)
+            {
+                arr.Set(i, args[i]);
+            }
+            return JSValue.FromInt32((int)(len + argCount));
+        }
+
+        // Array.prototype.slice
+        JSValue ArraySlice(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.slice called on non-array");
+            var arr = thisVal.AsObject();
+            var len = (int)arr.ArrayLength;
+            int start = args.Length > 0 ? args[0].ToInt32() : 0;
+            int end = args.Length > 1 && !args[1].IsUndefined ? args[1].ToInt32() : len;
+            if (start < 0) start = Math.Max(len + start, 0);
+            if (end < 0) end = Math.Max(len + end, 0);
+            start = Math.Min(start, len);
+            end = Math.Min(end, len);
+            var result = new JSObject(arrayProto, JSClassId.Array);
+            uint k = 0;
+            for (int i = start; i < end; i++)
+            {
+                result.Set(k++, arr.Get((uint)i));
+            }
+            return JSValue.FromObject(result);
+        }
+
+        // Array.prototype.splice
+        JSValue ArraySplice(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.splice called on non-array");
+            var arr = thisVal.AsObject();
+            var len = (int)arr.ArrayLength;
+            int start = args.Length > 0 ? args[0].ToInt32() : 0;
+            if (start < 0) start = Math.Max(len + start, 0);
+            start = Math.Min(start, len);
+            int deleteCount = args.Length > 1 ? Math.Max(0, Math.Min(args[1].ToInt32(), len - start)) : len - start;
+            
+            // Create result array with deleted elements
+            var result = new JSObject(arrayProto, JSClassId.Array);
+            for (int i = 0; i < deleteCount; i++)
+            {
+                result.Set((uint)i, arr.Get((uint)(start + i)));
+            }
+            
+            // Calculate items to insert
+            var insertItems = args.Length > 2 ? args.Skip(2).ToArray() : Array.Empty<JSValue>();
+            int insertCount = insertItems.Length;
+            int diff = insertCount - deleteCount;
+            
+            if (diff < 0)
+            {
+                // Shifting elements left
+                for (int i = start + deleteCount; i < len; i++)
+                {
+                    arr.Set((uint)(i + diff), arr.Get((uint)i));
+                }
+                arr.SetArrayLength((uint)(len + diff));
+            }
+            else if (diff > 0)
+            {
+                // Shifting elements right
+                for (int i = len - 1; i >= start + deleteCount; i--)
+                {
+                    arr.Set((uint)(i + diff), arr.Get((uint)i));
+                }
+            }
+            
+            // Insert new items
+            for (int i = 0; i < insertCount; i++)
+            {
+                arr.Set((uint)(start + i), insertItems[i]);
+            }
+            if (diff != 0 && insertCount + deleteCount == 0)
+                arr.SetArrayLength((uint)(len + diff));
+            else if (diff > 0)
+                arr.SetArrayLength((uint)(len + diff));
+            
+            return JSValue.FromObject(result);
+        }
+
+        // Array.prototype.concat
+        JSValue ArrayConcat(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.concat called on non-array");
+            var arr = thisVal.AsObject();
+            var result = new JSObject(arrayProto, JSClassId.Array);
+            uint k = 0;
+            for (uint i = 0; i < arr.ArrayLength; i++)
+            {
+                result.Set(k++, arr.Get(i));
+            }
+            foreach (var arg in args)
+            {
+                if (arg.IsObject && arg.AsObject().ClassId == JSClassId.Array)
+                {
+                    var subArr = arg.AsObject();
+                    for (uint i = 0; i < subArr.ArrayLength; i++)
+                    {
+                        result.Set(k++, subArr.Get(i));
+                    }
+                }
+                else
+                {
+                    result.Set(k++, arg);
+                }
+            }
+            return JSValue.FromObject(result);
+        }
+
+        // Array.prototype.join
+        JSValue ArrayJoin(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.join called on non-array");
+            var arr = thisVal.AsObject();
+            var separator = args.Length > 0 && !args[0].IsUndefined ? JSValueConversion.ToString(args[0]) : ",";
+            var parts = new List<string>();
+            for (uint i = 0; i < arr.ArrayLength; i++)
+            {
+                var val = arr.Get(i);
+                parts.Add(val.IsNull || val.IsUndefined ? "" : JSValueConversion.ToString(val));
+            }
+            return JSValue.FromString(string.Join(separator, parts));
+        }
+
+        // Array.prototype.reverse
+        JSValue ArrayReverse(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.reverse called on non-array");
+            var arr = thisVal.AsObject();
+            var len = arr.ArrayLength;
+            for (uint i = 0; i < len / 2; i++)
+            {
+                var temp = arr.Get(i);
+                arr.Set(i, arr.Get(len - 1 - i));
+                arr.Set(len - 1 - i, temp);
+            }
+            return thisVal;
+        }
+
+        // Array.prototype.indexOf
+        JSValue ArrayIndexOf(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.indexOf called on non-array");
+            var arr = thisVal.AsObject();
+            var searchElement = args.Length > 0 ? args[0] : JSValue.Undefined;
+            int fromIndex = args.Length > 1 ? args[1].ToInt32() : 0;
+            var len = (int)arr.ArrayLength;
+            if (fromIndex < 0) fromIndex = Math.Max(len + fromIndex, 0);
+            for (int i = fromIndex; i < len; i++)
+            {
+                if (JSValueConversion.StrictEquals(arr.Get((uint)i), searchElement))
+                    return JSValue.FromInt32(i);
+            }
+            return JSValue.FromInt32(-1);
+        }
+
+        // Array.prototype.lastIndexOf
+        JSValue ArrayLastIndexOf(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.lastIndexOf called on non-array");
+            var arr = thisVal.AsObject();
+            var searchElement = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var len = (int)arr.ArrayLength;
+            int fromIndex = args.Length > 1 ? args[1].ToInt32() : len - 1;
+            if (fromIndex < 0) fromIndex = len + fromIndex;
+            for (int i = Math.Min(fromIndex, len - 1); i >= 0; i--)
+            {
+                if (JSValueConversion.StrictEquals(arr.Get((uint)i), searchElement))
+                    return JSValue.FromInt32(i);
+            }
+            return JSValue.FromInt32(-1);
+        }
+
+        // Array.prototype.includes
+        JSValue ArrayIncludes(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.includes called on non-array");
+            var arr = thisVal.AsObject();
+            var searchElement = args.Length > 0 ? args[0] : JSValue.Undefined;
+            int fromIndex = args.Length > 1 ? args[1].ToInt32() : 0;
+            var len = (int)arr.ArrayLength;
+            if (fromIndex < 0) fromIndex = Math.Max(len + fromIndex, 0);
+            for (int i = fromIndex; i < len; i++)
+            {
+                if (JSValueConversion.SameValueZero(arr.Get((uint)i), searchElement))
+                    return JSValue.True;
+            }
+            return JSValue.False;
+        }
+
+        // Array.prototype.forEach
+        JSValue ArrayForEach(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.forEach called on non-array");
+            if (args.Length == 0 || !args[0].IsObject || !(args[0].AsObject() is JSFunction callback))
+                return ThrowTypeError("Callback is not a function");
+            var arr = thisVal.AsObject();
+            var thisArg = args.Length > 1 ? args[1] : JSValue.Undefined;
+            for (uint i = 0; i < arr.ArrayLength; i++)
+            {
+                callback.CallNative(thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
+            }
+            return JSValue.Undefined;
+        }
+
+        // Array.prototype.map
+        JSValue ArrayMap(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.map called on non-array");
+            if (args.Length == 0 || !args[0].IsObject || !(args[0].AsObject() is JSFunction callback))
+                return ThrowTypeError("Callback is not a function");
+            var arr = thisVal.AsObject();
+            var thisArg = args.Length > 1 ? args[1] : JSValue.Undefined;
+            var result = new JSObject(arrayProto, JSClassId.Array);
+            for (uint i = 0; i < arr.ArrayLength; i++)
+            {
+                var mapped = callback.CallNative(thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
+                result.Set(i, mapped);
+            }
+            return JSValue.FromObject(result);
+        }
+
+        // Array.prototype.filter
+        JSValue ArrayFilter(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.filter called on non-array");
+            if (args.Length == 0 || !args[0].IsObject || !(args[0].AsObject() is JSFunction callback))
+                return ThrowTypeError("Callback is not a function");
+            var arr = thisVal.AsObject();
+            var thisArg = args.Length > 1 ? args[1] : JSValue.Undefined;
+            var result = new JSObject(arrayProto, JSClassId.Array);
+            uint k = 0;
+            for (uint i = 0; i < arr.ArrayLength; i++)
+            {
+                var val = arr.Get(i);
+                var keep = callback.CallNative(thisArg, new[] { val, JSValue.FromInt32((int)i), thisVal });
+                if (JSValueConversion.ToBoolean(keep))
+                    result.Set(k++, val);
+            }
+            return JSValue.FromObject(result);
+        }
+
+        // Array.prototype.reduce
+        JSValue ArrayReduce(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.reduce called on non-array");
+            if (args.Length == 0 || !args[0].IsObject || !(args[0].AsObject() is JSFunction callback))
+                return ThrowTypeError("Callback is not a function");
+            var arr = thisVal.AsObject();
+            var len = arr.ArrayLength;
+            uint k = 0;
+            JSValue accumulator;
+            if (args.Length > 1)
+            {
+                accumulator = args[1];
+            }
+            else
+            {
+                if (len == 0)
+                    return ThrowTypeError("Reduce of empty array with no initial value");
+                accumulator = arr.Get(k++);
+            }
+            for (; k < len; k++)
+            {
+                accumulator = callback.CallNative(JSValue.Undefined, new[] { accumulator, arr.Get(k), JSValue.FromInt32((int)k), thisVal });
+            }
+            return accumulator;
+        }
+
+        // Array.prototype.reduceRight
+        JSValue ArrayReduceRight(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.reduceRight called on non-array");
+            if (args.Length == 0 || !args[0].IsObject || !(args[0].AsObject() is JSFunction callback))
+                return ThrowTypeError("Callback is not a function");
+            var arr = thisVal.AsObject();
+            var len = (int)arr.ArrayLength;
+            int k = len - 1;
+            JSValue accumulator;
+            if (args.Length > 1)
+            {
+                accumulator = args[1];
+            }
+            else
+            {
+                if (len == 0)
+                    return ThrowTypeError("Reduce of empty array with no initial value");
+                accumulator = arr.Get((uint)k--);
+            }
+            for (; k >= 0; k--)
+            {
+                accumulator = callback.CallNative(JSValue.Undefined, new[] { accumulator, arr.Get((uint)k), JSValue.FromInt32(k), thisVal });
+            }
+            return accumulator;
+        }
+
+        // Array.prototype.every
+        JSValue ArrayEvery(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.every called on non-array");
+            if (args.Length == 0 || !args[0].IsObject || !(args[0].AsObject() is JSFunction callback))
+                return ThrowTypeError("Callback is not a function");
+            var arr = thisVal.AsObject();
+            var thisArg = args.Length > 1 ? args[1] : JSValue.Undefined;
+            for (uint i = 0; i < arr.ArrayLength; i++)
+            {
+                var result = callback.CallNative(thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
+                if (!JSValueConversion.ToBoolean(result))
+                    return JSValue.False;
+            }
+            return JSValue.True;
+        }
+
+        // Array.prototype.some
+        JSValue ArraySome(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.some called on non-array");
+            if (args.Length == 0 || !args[0].IsObject || !(args[0].AsObject() is JSFunction callback))
+                return ThrowTypeError("Callback is not a function");
+            var arr = thisVal.AsObject();
+            var thisArg = args.Length > 1 ? args[1] : JSValue.Undefined;
+            for (uint i = 0; i < arr.ArrayLength; i++)
+            {
+                var result = callback.CallNative(thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
+                if (JSValueConversion.ToBoolean(result))
+                    return JSValue.True;
+            }
+            return JSValue.False;
+        }
+
+        // Array.prototype.find
+        JSValue ArrayFind(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.find called on non-array");
+            if (args.Length == 0 || !args[0].IsObject || !(args[0].AsObject() is JSFunction callback))
+                return ThrowTypeError("Callback is not a function");
+            var arr = thisVal.AsObject();
+            var thisArg = args.Length > 1 ? args[1] : JSValue.Undefined;
+            for (uint i = 0; i < arr.ArrayLength; i++)
+            {
+                var val = arr.Get(i);
+                var result = callback.CallNative(thisArg, new[] { val, JSValue.FromInt32((int)i), thisVal });
+                if (JSValueConversion.ToBoolean(result))
+                    return val;
+            }
+            return JSValue.Undefined;
+        }
+
+        // Array.prototype.findIndex
+        JSValue ArrayFindIndex(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.findIndex called on non-array");
+            if (args.Length == 0 || !args[0].IsObject || !(args[0].AsObject() is JSFunction callback))
+                return ThrowTypeError("Callback is not a function");
+            var arr = thisVal.AsObject();
+            var thisArg = args.Length > 1 ? args[1] : JSValue.Undefined;
+            for (uint i = 0; i < arr.ArrayLength; i++)
+            {
+                var result = callback.CallNative(thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
+                if (JSValueConversion.ToBoolean(result))
+                    return JSValue.FromInt32((int)i);
+            }
+            return JSValue.FromInt32(-1);
+        }
+
+        // Array.prototype.fill
+        JSValue ArrayFill(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.fill called on non-array");
+            var arr = thisVal.AsObject();
+            var value = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var len = (int)arr.ArrayLength;
+            int start = args.Length > 1 ? args[1].ToInt32() : 0;
+            int end = args.Length > 2 && !args[2].IsUndefined ? args[2].ToInt32() : len;
+            if (start < 0) start = Math.Max(len + start, 0);
+            if (end < 0) end = Math.Max(len + end, 0);
+            start = Math.Min(start, len);
+            end = Math.Min(end, len);
+            for (int i = start; i < end; i++)
+            {
+                arr.Set((uint)i, value);
+            }
+            return thisVal;
+        }
+
+        // Array.prototype.flat (simple, depth=1)
+        JSValue ArrayFlat(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.flat called on non-array");
+            var arr = thisVal.AsObject();
+            int depth = args.Length > 0 ? args[0].ToInt32() : 1;
+            var result = new JSObject(arrayProto, JSClassId.Array);
+            FlattenArray(arr, result, depth, 0);
+            return JSValue.FromObject(result);
+        }
+
+        void FlattenArray(JSObject source, JSObject target, int depth, uint targetIndex)
+        {
+            for (uint i = 0; i < source.ArrayLength; i++)
+            {
+                var val = source.Get(i);
+                if (depth > 0 && val.IsObject && val.AsObject().ClassId == JSClassId.Array)
+                {
+                    FlattenArray(val.AsObject(), target, depth - 1, target.ArrayLength);
+                }
+                else
+                {
+                    target.Set(target.ArrayLength, val);
+                }
+            }
+        }
+
+        // Array.prototype.at (ES2022)
+        JSValue ArrayAt(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.at called on non-array");
+            var arr = thisVal.AsObject();
+            var len = (int)arr.ArrayLength;
+            int index = args.Length > 0 ? args[0].ToInt32() : 0;
+            if (index < 0) index = len + index;
+            if (index < 0 || index >= len)
+                return JSValue.Undefined;
+            return arr.Get((uint)index);
+        }
+
+        // Array.prototype.toString
+        JSValue ArrayToString(JSValue thisVal, JSValue[] args)
+        {
+            return ArrayJoin(thisVal, Array.Empty<JSValue>());
+        }
+
+        // Array.isArray static method
+        JSValue ArrayIsArray(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            return JSValue.FromBoolean(arg.IsObject && arg.AsObject().ClassId == JSClassId.Array);
+        }
+
+        // Array.from static method
+        JSValue ArrayFrom(JSValue thisVal, JSValue[] args)
+        {
+            var arrayLike = args.Length > 0 ? args[0] : JSValue.Undefined;
+            JSFunction? mapFn = args.Length > 1 && args[1].IsObject ? args[1].AsObject() as JSFunction : null;
+            var thisArg = args.Length > 2 ? args[2] : JSValue.Undefined;
+            
+            var result = new JSObject(arrayProto, JSClassId.Array);
+            if (!arrayLike.IsObject)
+                return JSValue.FromObject(result);
+            
+            var obj = arrayLike.AsObject();
+            var lengthVal = obj.Get("length");
+            if (!lengthVal.IsNumber)
+                return JSValue.FromObject(result);
+            
+            var len = lengthVal.ToInt32();
+            for (int i = 0; i < len; i++)
+            {
+                var val = obj.Get((uint)i);
+                if (mapFn != null)
+                    val = mapFn.CallNative(thisArg, new[] { val, JSValue.FromInt32(i) });
+                result.Set((uint)i, val);
+            }
+            return JSValue.FromObject(result);
+        }
+
+        // Array.of static method
+        JSValue ArrayOf(JSValue thisVal, JSValue[] args)
+        {
+            var result = new JSObject(arrayProto, JSClassId.Array);
+            for (int i = 0; i < args.Length; i++)
+            {
+                result.Set((uint)i, args[i]);
+            }
+            return JSValue.FromObject(result);
+        }
+
         arrayProto.Set("push", JSValue.FromObject(new JSFunction(ArrayPush, "push", 1, functionProto)));
         arrayProto.Set("pop", JSValue.FromObject(new JSFunction(ArrayPop, "pop", 0, functionProto)));
+        arrayProto.Set("shift", JSValue.FromObject(new JSFunction(ArrayShift, "shift", 0, functionProto)));
+        arrayProto.Set("unshift", JSValue.FromObject(new JSFunction(ArrayUnshift, "unshift", 1, functionProto)));
+        arrayProto.Set("slice", JSValue.FromObject(new JSFunction(ArraySlice, "slice", 2, functionProto)));
+        arrayProto.Set("splice", JSValue.FromObject(new JSFunction(ArraySplice, "splice", 2, functionProto)));
+        arrayProto.Set("concat", JSValue.FromObject(new JSFunction(ArrayConcat, "concat", 1, functionProto)));
+        arrayProto.Set("join", JSValue.FromObject(new JSFunction(ArrayJoin, "join", 1, functionProto)));
+        arrayProto.Set("reverse", JSValue.FromObject(new JSFunction(ArrayReverse, "reverse", 0, functionProto)));
+        arrayProto.Set("indexOf", JSValue.FromObject(new JSFunction(ArrayIndexOf, "indexOf", 1, functionProto)));
+        arrayProto.Set("lastIndexOf", JSValue.FromObject(new JSFunction(ArrayLastIndexOf, "lastIndexOf", 1, functionProto)));
+        arrayProto.Set("includes", JSValue.FromObject(new JSFunction(ArrayIncludes, "includes", 1, functionProto)));
+        arrayProto.Set("forEach", JSValue.FromObject(new JSFunction(ArrayForEach, "forEach", 1, functionProto)));
+        arrayProto.Set("map", JSValue.FromObject(new JSFunction(ArrayMap, "map", 1, functionProto)));
+        arrayProto.Set("filter", JSValue.FromObject(new JSFunction(ArrayFilter, "filter", 1, functionProto)));
+        arrayProto.Set("reduce", JSValue.FromObject(new JSFunction(ArrayReduce, "reduce", 1, functionProto)));
+        arrayProto.Set("reduceRight", JSValue.FromObject(new JSFunction(ArrayReduceRight, "reduceRight", 1, functionProto)));
+        arrayProto.Set("every", JSValue.FromObject(new JSFunction(ArrayEvery, "every", 1, functionProto)));
+        arrayProto.Set("some", JSValue.FromObject(new JSFunction(ArraySome, "some", 1, functionProto)));
+        arrayProto.Set("find", JSValue.FromObject(new JSFunction(ArrayFind, "find", 1, functionProto)));
+        arrayProto.Set("findIndex", JSValue.FromObject(new JSFunction(ArrayFindIndex, "findIndex", 1, functionProto)));
+        arrayProto.Set("fill", JSValue.FromObject(new JSFunction(ArrayFill, "fill", 1, functionProto)));
+        arrayProto.Set("flat", JSValue.FromObject(new JSFunction(ArrayFlat, "flat", 0, functionProto)));
+        arrayProto.Set("at", JSValue.FromObject(new JSFunction(ArrayAt, "at", 1, functionProto)));
+        arrayProto.Set("toString", JSValue.FromObject(new JSFunction(ArrayToString, "toString", 0, functionProto)));
+
+        // Static methods on Array constructor
+        arrayCtorFn.Set("isArray", JSValue.FromObject(new JSFunction(ArrayIsArray, "isArray", 1, functionProto)));
+        arrayCtorFn.Set("from", JSValue.FromObject(new JSFunction(ArrayFrom, "from", 1, functionProto)));
+        arrayCtorFn.Set("of", JSValue.FromObject(new JSFunction(ArrayOf, "of", 0, functionProto)));
 
         _globalObject.Set("Array", JSValue.FromObject(arrayCtorFn));
     }

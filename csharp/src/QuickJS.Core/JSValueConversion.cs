@@ -535,4 +535,50 @@ public static class JSValueConversion
     }
 
     #endregion
+
+    #region StrictEquals
+
+    /// <summary>
+    /// Implements the Strict Equality Comparison (===) operation.
+    /// </summary>
+    /// <param name="x">First value.</param>
+    /// <param name="y">Second value.</param>
+    /// <returns>True if the values are strictly equal.</returns>
+    public static bool StrictEquals(JSValue x, JSValue y)
+    {
+        // Different types are never strictly equal (except Int and Float64 which are both numbers)
+        if (x.Tag != y.Tag)
+        {
+            if (x.IsNumber && y.IsNumber)
+            {
+                double dx = ToNumber(x);
+                double dy = ToNumber(y);
+                return dx == dy; // NaN !== NaN, +0 === -0
+            }
+            return false;
+        }
+
+        switch (x.Tag)
+        {
+            case JSValueType.Undefined:
+            case JSValueType.Null:
+                return true;
+            case JSValueType.Bool:
+                return x.IsTrue == y.IsTrue;
+            case JSValueType.Int:
+                return x.ToInt32() == y.ToInt32();
+            case JSValueType.Float64:
+                double dx = x.ToDouble();
+                double dy = y.ToDouble();
+                return dx == dy; // NaN !== NaN (returns false)
+            case JSValueType.String:
+                return x.ToString() == y.ToString();
+            case JSValueType.Object:
+                return ReferenceEquals(x.AsObject(), y.AsObject());
+            default:
+                return false;
+        }
+    }
+
+    #endregion
 }

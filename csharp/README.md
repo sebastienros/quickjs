@@ -52,9 +52,9 @@ Use `#if` directives when needed:
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
 | Phase 5: Runtime Objects | ✅ Complete | 4/4 | ~500 |
 | Phase 6: VM & Interpreter | ✅ Complete | 7/7 | ~704 |
-| Phase 7: Built-in Objects | ✅ Complete | 9/9 | ~760 |
+| Phase 7: Built-in Objects | ✅ Complete | 9/9 | ~844 |
 
-**Total Tests: 3698** (all passing, 0 skipped)
+**Total Tests: 3866** (all passing, 0 skipped)
 
 **Latest Commit**: `step-7.9-collections`
 
@@ -572,7 +572,8 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 **Commit**: `step-7.1-object-function`  
 **Doc**: `docs/40-builtin-object-function.md`
 
-- [x] Implement `Object` constructor and methods
+- [x] Implement `Object` constructor and methods (keys, values, entries, assign, freeze, seal, isFrozen, isSealed, is, fromEntries, getOwnPropertyDescriptor, getOwnPropertyNames, getPrototypeOf, setPrototypeOf, defineProperty, defineProperties, create, preventExtensions, isExtensible)
+- [x] Implement `Object.prototype` methods (hasOwnProperty, propertyIsEnumerable, isPrototypeOf, toString, valueOf)
 - [x] Implement `Function` constructor (stubbed) and methods
 - [x] Write built-in tests
 
@@ -593,7 +594,8 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 **Doc**: `docs/42-number-math.md`
 
 - [x] Implement Number constructor and methods
-- [x] Implement Math object
+- [x] Implement Math object with full API (abs, floor, ceil, round, sqrt, pow, sin, cos, tan, log, exp, min, max, random, sign, trunc, cbrt, log2, log10, clz32)
+- [x] Implement Math constants (E, PI, LN2, LN10, LOG2E, LOG10E, SQRT2, SQRT1_2)
 - [x] Write math tests
 
 ---
@@ -603,7 +605,7 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 **Doc**: `docs/43-string.md`
 
 - [x] Implement String constructor
-- [ ] Implement all String.prototype methods
+- [x] Implement String.prototype methods (charAt, charCodeAt, indexOf, lastIndexOf, slice, substring, substr, split, toLowerCase, toUpperCase, trim, trimStart, trimEnd, padStart, padEnd, repeat, includes, startsWith, endsWith, replace, replaceAll, at)
 - [x] Write string tests
 
 ---
@@ -613,8 +615,8 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 **Doc**: `docs/44-array.md`
 
 - [x] Implement Array constructor
-- [ ] Implement array methods (map, filter, reduce, etc.)
-- [ ] Implement iterators
+- [x] Implement Array.isArray, Array.from, Array.of
+- [x] Implement array methods (push, pop, shift, unshift, slice, splice, concat, join, reverse, sort, indexOf, lastIndexOf, includes, find, findIndex, filter, map, forEach, every, some, reduce, reduceRight, fill, copyWithin, flat, flatMap, at, entries, keys, values)
 - [x] Write array tests
 
 ---

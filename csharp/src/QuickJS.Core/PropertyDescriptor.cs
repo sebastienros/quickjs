@@ -219,6 +219,17 @@ public sealed class PropertyDescriptor
     }
 
     /// <summary>
+    /// Creates a data descriptor with specified PropertyFlags.
+    /// </summary>
+    /// <param name="value">The property value.</param>
+    /// <param name="flags">The property flags.</param>
+    /// <returns>A new data property descriptor.</returns>
+    public static PropertyDescriptor Data(JSValue value, PropertyFlags flags)
+    {
+        return new PropertyDescriptor(value, flags);
+    }
+
+    /// <summary>
     /// Creates a data descriptor with specified flags.
     /// </summary>
     /// <param name="value">The property value.</param>
