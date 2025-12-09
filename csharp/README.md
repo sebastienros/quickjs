@@ -51,9 +51,9 @@ Use `#if` directives when needed:
 | Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
 | Phase 5: Runtime Objects | ✅ Complete | 4/4 | ~500 |
-| Phase 6: VM & Interpreter | 🔄 In Progress | 3/7 | ~684 |
+| Phase 6: VM & Interpreter | 🔄 In Progress | 5/7 | ~690 |
 
-**Total Tests: 3634** (all passing, 0 skipped)
+**Total Tests: 3646** (all passing, 0 skipped)
 
 **Latest Commit**: `step-6.5-interpreter-calls`
 
@@ -512,28 +512,28 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 6.4: Interpreter - Control Flow
+### Step 6.4: Interpreter - Control Flow ✅
 **Commit**: `step-6.4-interpreter-control`  
 **Doc**: `docs/28-interpreter-control-flow.md`
 
-- [ ] Implement jump opcodes
-- [ ] Implement conditional jumps
-- [ ] Execute if/else and loops
-- [ ] Write control flow tests
+- [x] Implement jump opcodes
+- [x] Implement conditional jumps
+- [x] Execute if/else and loops
+- [x] Write control flow tests
 
 **Learning Goals**: PC manipulation, loop execution
 
 ---
 
-### Step 6.5: Interpreter - Function Calls
+### Step 6.5: Interpreter - Function Calls ✅
 **Commit**: `step-6.5-interpreter-calls`  
 **Doc**: `docs/29-function-calls.md`
 
-- [ ] Implement call stack frames
-- [ ] Implement call/return opcodes
+- [x] Implement call stack frames
+- [x] Implement call/return opcodes
 - [ ] Handle arguments object
-- [ ] Handle `this` binding
-- [ ] Write function call tests
+- [x] Handle `this` binding
+- [x] Write function call tests
 
 **Learning Goals**: Call stack management, `this` binding
 
@@ -838,7 +838,7 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ### Current Status
 
-**Current Step**: Step 6.4 Complete  
+**Current Step**: Step 6.5 Complete  
 **Last Commit**: `step-6.5-interpreter-calls`  
 **Next Step**: `step-6.6-interpreter-closures`
 
