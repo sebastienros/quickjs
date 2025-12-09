@@ -587,13 +587,13 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 7.3: Number and Math
+### Step 7.3: Number and Math ✅
 **Commit**: `step-7.3-number-math`  
 **Doc**: `docs/42-number-math.md`
 
-- [ ] Implement Number constructor and methods
-- [ ] Implement Math object
-- [ ] Write math tests
+- [x] Implement Number constructor and methods
+- [x] Implement Math object
+- [x] Write math tests
 
 ---
 

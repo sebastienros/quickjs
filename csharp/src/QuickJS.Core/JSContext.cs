@@ -611,6 +611,7 @@ public sealed class JSContext : IDisposable
         InitializeObjectConstructor();
         InitializeFunctionConstructor();
         InitializeErrorConstructors();
+        InitializeNumberAndMath();
     }
 
     private void InitializeObjectConstructor()
@@ -757,6 +758,83 @@ public sealed class JSContext : IDisposable
 
         _globalObject.Set(name, JSValue.FromObject(ctor));
         _errorPrototypes[type] = proto;
+    }
+
+    private void InitializeNumberAndMath()
+    {
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+
+        // Number.prototype
+        var numberProto = new JSObject(objectProto, JSClassId.Number);
+        SetClassPrototype(JSClassId.Number, numberProto);
+
+        JSValue NumberCtor(JSValue thisVal, JSValue[] args)
+        {
+            double num = args.Length > 0 ? JSValueConversion.ToNumber(args[0]) : 0.0;
+            var numVal = JSValue.FromDouble(num);
+
+            // If called with new, interpreter supplies an object as thisVal; set its internal value
+            if (thisVal.IsObject && thisVal.AsObject().ClassId == JSClassId.Object)
+            {
+                var wrapper = new JSObject(numberProto, JSClassId.Number) { InternalValue = numVal };
+                return JSValue.FromObject(wrapper);
+            }
+
+            if (thisVal.IsObject && thisVal.AsObject().ClassId == JSClassId.Number)
+            {
+                thisVal.AsObject().InternalValue = numVal;
+                return thisVal;
+            }
+
+            return numVal;
+        }
+
+        var numberCtor = new JSFunction(NumberCtor, "Number", 1, functionProto);
+        numberCtor.Set("prototype", JSValue.FromObject(numberProto));
+        numberProto.Set("constructor", JSValue.FromObject(numberCtor));
+        _globalObject.Set("Number", JSValue.FromObject(numberCtor));
+
+        // Math object
+        var mathObj = new JSObject(objectProto, JSClassId.Object);
+
+        // Helper to add Math functions
+        void AddMathFunc(string name, int length, Func<double[], double> impl)
+        {
+            JSValue Func(JSValue _, JSValue[] args)
+            {
+                var nums = new double[args.Length];
+                for (int i = 0; i < args.Length; i++)
+                    nums[i] = JSValueConversion.ToNumber(args[i]);
+                return JSValue.FromDouble(impl(nums));
+            }
+
+            mathObj.Set(name, JSValue.FromObject(new JSFunction(Func, name, length, functionProto)));
+        }
+
+        // Math constants
+        mathObj.Set("PI", JSValue.FromDouble(Math.PI));
+        mathObj.Set("E", JSValue.FromDouble(Math.E));
+
+        // Math functions (subset)
+        AddMathFunc("abs", 1, xs => Math.Abs(xs.Length > 0 ? xs[0] : double.NaN));
+        AddMathFunc("floor", 1, xs => Math.Floor(xs.Length > 0 ? xs[0] : double.NaN));
+        AddMathFunc("ceil", 1, xs => Math.Ceiling(xs.Length > 0 ? xs[0] : double.NaN));
+        AddMathFunc("round", 1, xs => Math.Round(xs.Length > 0 ? xs[0] : double.NaN));
+        AddMathFunc("max", 2, xs => xs.Length == 0 ? double.NegativeInfinity : xs.Max());
+        AddMathFunc("min", 2, xs => xs.Length == 0 ? double.PositiveInfinity : xs.Min());
+        AddMathFunc("pow", 2, xs => xs.Length >= 2 ? Math.Pow(xs[0], xs[1]) : double.NaN);
+        AddMathFunc("sqrt", 1, xs => xs.Length > 0 ? Math.Sqrt(xs[0]) : double.NaN);
+        AddMathFunc("random", 0, xs =>
+        {
+            // Simple LCG for determinism
+            _randomState = _randomState * 6364136223846793005UL + 1;
+            // Use high 53 bits
+            var val = (double)(_randomState >> 11) / (double)(1UL << 53);
+            return val;
+        });
+
+        _globalObject.Set("Math", JSValue.FromObject(mathObj));
     }
 
     #endregion

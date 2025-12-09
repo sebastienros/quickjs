@@ -92,6 +92,16 @@ public static class JSValueConversion
                 return double.NaN;
 
             case JSValueType.Object:
+                if (value.TryGetObject(out var obj))
+                {
+                    switch (obj.ClassId)
+                    {
+                        case JSClassId.Number:
+                        case JSClassId.String:
+                        case JSClassId.Boolean:
+                            return ToNumber(obj.InternalValue);
+                    }
+                }
                 // TODO: Proper ToPrimitive implementation
                 return double.NaN;
 
@@ -330,6 +340,17 @@ public static class JSValueConversion
     /// <returns>The string result.</returns>
     public static string ToString(JSValue value)
     {
+        if (value.Tag == JSValueType.Object && value.TryGetObject(out var obj))
+        {
+            switch (obj.ClassId)
+            {
+                case JSClassId.String:
+                case JSClassId.Number:
+                case JSClassId.Boolean:
+                    return ToString(obj.InternalValue);
+            }
+        }
+
         return value.ToString() ?? "";
     }
 
