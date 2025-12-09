@@ -370,6 +370,16 @@ public sealed class JSFunctionDef
     public int ThisVarIndex { get; set; } = -1;
 
     /// <summary>
+    /// Exception handlers for try/catch/finally.
+    /// </summary>
+    public List<JSExceptionHandler> ExceptionHandlers { get; } = new List<JSExceptionHandler>();
+
+    /// <summary>
+    /// Adds an exception handler entry.
+    /// </summary>
+    public void AddExceptionHandler(JSExceptionHandler handler) => ExceptionHandlers.Add(handler);
+
+    /// <summary>
     /// Gets or sets the index of the 'new.target' variable, or -1 if none.
     /// </summary>
     public int NewTargetVarIndex { get; set; } = -1;

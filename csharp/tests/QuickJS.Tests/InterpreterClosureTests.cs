@@ -42,7 +42,7 @@ public class InterpreterClosureTests
         inner.ByteCode.EmitOp(OpCode.Add);
         inner.ByteCode.EmitOp(OpCode.Return);
 
-        int innerConst = outer.Constants.Add(JSValue.FromObject(inner));
+        int innerConst = outer.Constants.Add(JSValue.FromObject(new JSFunction(inner)));
 
         // outer bytecode
         outer.ByteCode.EmitOp(OpCode.PushI32);
@@ -94,7 +94,7 @@ public class InterpreterClosureTests
         inner.ByteCode.EmitOp(OpCode.GetVarRef0);
         inner.ByteCode.EmitOp(OpCode.Return);
 
-        int innerConst = outer.Constants.Add(JSValue.FromObject(inner));
+        int innerConst = outer.Constants.Add(JSValue.FromObject(new JSFunction(inner)));
 
         outer.ByteCode.EmitOp(OpCode.PushI32);
         outer.ByteCode.EmitI32(7);

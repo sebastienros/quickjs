@@ -37,6 +37,10 @@ public sealed class Interpreter
     /// </summary>
     private CallFrame? _currentFrame;
 
+    private enum PendingActionType { None, Return, Throw }
+    private PendingActionType _pendingAction = PendingActionType.None;
+    private JSValue _pendingValue = JSValue.Undefined;
+
     #endregion
 
     #region Constructor
@@ -2324,6 +2328,64 @@ public sealed class Interpreter
                     }
                     break;
 
+                case OpCode.FClosure:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int constIdx = bytecode[pc] |
+                                       (bytecode[pc + 1] << 8) |
+                                       (bytecode[pc + 2] << 16) |
+                                       (bytecode[pc + 3] << 24);
+                        pc += 4;
+                        var fnVal = function!.Constants.Get(constIdx);
+                        JSFunctionDef? fnDef = null;
+                        if (fnVal.IsObject)
+                        {
+                            var o = fnVal.AsObject();
+                            if (o is JSFunction f && f.FunctionDef != null)
+                                fnDef = f.FunctionDef;
+                        }
+                        if (fnDef == null)
+                        {
+                            _context.ThrowTypeError("Invalid function constant for fclosure");
+                            return JSValue.Exception;
+                        }
+                        var outerVarRefs = _currentFrame?.VarRefs;
+                        var fnObj = JSFunction.CreateFromDef(fnDef, outerVarRefs);
+                        Push(JSValue.FromObject(fnObj));
+                    }
+                    break;
+
+                case OpCode.FClosure8:
+                    {
+                        if (pc >= bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int constIdx = bytecode[pc++];
+                        var fnVal = function!.Constants.Get(constIdx);
+                        JSFunctionDef? fnDef = null;
+                        if (fnVal.IsObject)
+                        {
+                            var o = fnVal.AsObject();
+                            if (o is JSFunction f && f.FunctionDef != null)
+                                fnDef = f.FunctionDef;
+                        }
+                        if (fnDef == null)
+                        {
+                            _context.ThrowTypeError("Invalid function constant for fclosure8");
+                            return JSValue.Exception;
+                        }
+                        var outerVarRefs = _currentFrame?.VarRefs;
+                        var fnObj = JSFunction.CreateFromDef(fnDef, outerVarRefs);
+                        Push(JSValue.FromObject(fnObj));
+                    }
+                    break;
+
                 case OpCode.SpecialObject:
                     {
                         if (pc >= bytecode.Length)
@@ -2434,6 +2496,32 @@ public sealed class Interpreter
                             break;
                         }
                         CreateAndPushVarRef(_currentFrame, function, varIndex);
+                    }
+                    break;
+
+                case OpCode.Throw:
+                    {
+                        var exVal = Pop();
+                        if (!HandleThrow(pc - 1, exVal, function!, ref pc))
+                            return JSValue.Exception;
+                    }
+                    break;
+
+                case OpCode.Ret:
+                    {
+                        if (_pendingAction == PendingActionType.Return)
+                        {
+                            returnValue = _pendingValue;
+                            _pendingAction = PendingActionType.None;
+                            didReturn = true;
+                        }
+                        else if (_pendingAction == PendingActionType.Throw)
+                        {
+                            var exVal = _pendingValue;
+                            _pendingAction = PendingActionType.None;
+                            if (!HandleThrow(pc - 1, exVal, function!, ref pc))
+                                return JSValue.Exception;
+                        }
                     }
                     break;
 
@@ -3108,12 +3196,18 @@ public sealed class Interpreter
 
                 // Function returns
                 case OpCode.Return:
-                    returnValue = Pop();
-                    didReturn = true;
+                    {
+                        var rv = Pop();
+                        if (!HandleReturn(pc - 1, rv, function!, ref pc, ref didReturn, ref returnValue))
+                            return JSValue.Exception;
+                    }
                     break;
                 case OpCode.ReturnUndef:
-                    returnValue = JSValue.Undefined;
-                    didReturn = true;
+                    {
+                        var rv = JSValue.Undefined;
+                        if (!HandleReturn(pc - 1, rv, function!, ref pc, ref didReturn, ref returnValue))
+                            return JSValue.Exception;
+                    }
                     break;
 
                 default:
@@ -3138,6 +3232,73 @@ public sealed class Interpreter
     private void ThrowStackUnderflow()
     {
         _context.ThrowError(JSErrorType.RangeError, "Stack underflow");
+    }
+
+    private bool HandleThrow(int throwPc, JSValue exVal, JSFunctionDef function, ref int pc)
+    {
+        // Scan handlers
+        var handler = FindHandler(function, throwPc);
+        if (handler != null)
+        {
+            _stackPointer = handler.StackDepth;
+            if (handler.HasCatch)
+            {
+                pc = handler.CatchPc;
+                Push(exVal);
+                return true;
+            }
+            if (handler.HasFinally)
+            {
+                pc = handler.FinallyPc;
+                _pendingAction = PendingActionType.Throw;
+                _pendingValue = exVal;
+                return true;
+            }
+        }
+
+        // Propagate to caller
+        if (_currentFrame != null)
+            DetachVarRefs(_currentFrame);
+        _currentFrame = _currentFrame?.Parent;
+        if (_currentFrame == null)
+        {
+            _context.ThrowError(JSErrorType.Error, exVal.ToString() ?? "Exception");
+            return false;
+        }
+        // Let caller loop handle continuation
+        pc = 0;
+        return true;
+    }
+
+    private bool HandleReturn(int returnPc, JSValue rv, JSFunctionDef function, ref int pc, ref bool didReturn, ref JSValue returnValue)
+    {
+        var handler = FindHandler(function, returnPc);
+        if (handler != null && handler.HasFinally)
+        {
+            _stackPointer = handler.StackDepth;
+            pc = handler.FinallyPc;
+            _pendingAction = PendingActionType.Return;
+            _pendingValue = rv;
+            return true; // handled; execution continues into finally
+        }
+
+        returnValue = rv;
+        didReturn = true;
+        return true; // handled; caller will exit loop
+    }
+
+    private JSExceptionHandler? FindHandler(JSFunctionDef function, int pc)
+    {
+        JSExceptionHandler? best = null;
+        foreach (var h in function.ExceptionHandlers)
+        {
+            if (pc >= h.StartPc && pc < h.EndPc)
+            {
+                if (best == null || h.StartPc >= best.StartPc)
+                    best = h;
+            }
+        }
+        return best;
     }
 
     #endregion

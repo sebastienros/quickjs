@@ -250,7 +250,7 @@ public sealed class CallFrame
         // Resize
         var newArr = new JSVarRef[_varRefs.Length + 1];
         Array.Copy(_varRefs, newArr, _varRefs.Length);
-        newArr[^1] = varRef;
+        newArr[newArr.Length - 1] = varRef;
         _varRefs = newArr;
         return _varRefs.Length - 1;
     }

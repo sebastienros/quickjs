@@ -51,11 +51,11 @@ Use `#if` directives when needed:
 | Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
 | Phase 5: Runtime Objects | ✅ Complete | 4/4 | ~500 |
-| Phase 6: VM & Interpreter | 🔄 In Progress | 6/7 | ~698 |
+| Phase 6: VM & Interpreter | ✅ Complete | 7/7 | ~704 |
 
-**Total Tests: 3652** (all passing, 0 skipped)
+**Total Tests: 3658** (all passing, 0 skipped)
 
-**Latest Commit**: `step-6.5-interpreter-calls`
+**Latest Commit**: `step-6.7-interpreter-exceptions`
 
 # Detailed Implementation Plan
 
@@ -552,14 +552,14 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 6.7: Interpreter - Exceptions
+### Step 6.7: Interpreter - Exceptions ✅
 **Commit**: `step-6.7-interpreter-exceptions`  
 **Doc**: `docs/31-exception-handling-runtime.md`
 
-- [ ] Implement exception tables lookup
-- [ ] Implement stack unwinding
-- [ ] Execute try/catch/finally
-- [ ] Write exception tests
+- [x] Implement exception tables lookup
+- [x] Implement stack unwinding
+- [x] Execute try/catch/finally
+- [x] Write exception tests
 
 **Learning Goals**: Exception propagation
 
