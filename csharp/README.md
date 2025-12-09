@@ -54,10 +54,11 @@ Use `#if` directives when needed:
 | Phase 6: VM & Interpreter | ✅ Complete | 7/7 | ~704 |
 | Phase 7: Built-in Objects | ✅ Complete | 13/13 | ~1077 |
 | Phase 8: Standard Library | ✅ Complete | 3/3 | ~108 |
+| Phase 9: Advanced Features | 🚧 In Progress | 1/4 | ~81 |
 
-**Total Tests: 2242** (all passing, 0 skipped)
+**Total Tests: 2323** (all passing, 0 skipped)
 
-**Latest Commit**: `step-8.3-modules`
+**Latest Commit**: `step-9.1-eval`
 
 # Detailed Implementation Plan
 
@@ -750,13 +751,15 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ## Phase 9: Advanced Features
 
-### Step 9.1: Eval and Function Constructor
+### Step 9.1: Eval and Function Constructor ✅
 **Commit**: `step-9.1-eval`  
 **Doc**: `docs/56-eval.md`
 
-- [ ] Implement eval()
-- [ ] Implement new Function()
-- [ ] Write eval tests
+- [x] Implement eval()
+- [x] Implement new Function()
+- [x] Implement JSEval class
+- [x] Add Context.Evaluate() methods
+- [x] Write eval tests
 
 ---
 

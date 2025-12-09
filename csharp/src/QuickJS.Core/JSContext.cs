@@ -341,6 +341,65 @@ public sealed class JSContext : IDisposable
 
     #endregion
 
+    #region Code Evaluation
+
+    /// <summary>
+    /// Evaluates JavaScript source code in this context.
+    /// </summary>
+    /// <param name="source">The JavaScript source code to evaluate.</param>
+    /// <param name="fileName">The file name for error reporting (optional).</param>
+    /// <returns>The result of evaluation, or <see cref="JSValue.Exception"/> on error.</returns>
+    /// <remarks>
+    /// <para>
+    /// This method compiles and executes JavaScript code in the global scope.
+    /// Variables declared with <c>var</c> become properties of the global object.
+    /// </para>
+    /// <example>
+    /// <code>
+    /// var result = context.Evaluate("1 + 2"); // Returns 3
+    /// context.Evaluate("var x = 42;"); // x is now global
+    /// var x = context.GetGlobalProperty("x"); // Returns 42
+    /// </code>
+    /// </example>
+    /// </remarks>
+    public JSValue Evaluate(string source, string fileName = "<eval>")
+    {
+        ThrowIfDisposed();
+        return JSEval.Evaluate(this, source, fileName, JSEval.EvalFlags.Global);
+    }
+
+    /// <summary>
+    /// Evaluates JavaScript source code as a module.
+    /// </summary>
+    /// <param name="source">The JavaScript source code to evaluate.</param>
+    /// <param name="fileName">The file name for error reporting (optional).</param>
+    /// <returns>The result of evaluation, or <see cref="JSValue.Exception"/> on error.</returns>
+    /// <remarks>
+    /// Module code runs in strict mode and can use import/export declarations.
+    /// </remarks>
+    public JSValue EvaluateModule(string source, string fileName = "<module>")
+    {
+        ThrowIfDisposed();
+        return JSEval.Evaluate(this, source, fileName, JSEval.EvalFlags.Module);
+    }
+
+    /// <summary>
+    /// Compiles JavaScript source code without executing it.
+    /// </summary>
+    /// <param name="source">The JavaScript source code to compile.</param>
+    /// <param name="fileName">The file name for error reporting (optional).</param>
+    /// <returns>The compiled function, or <see cref="JSValue.Exception"/> on error.</returns>
+    /// <remarks>
+    /// The returned function can be called later to execute the compiled code.
+    /// </remarks>
+    public JSValue Compile(string source, string fileName = "<script>")
+    {
+        ThrowIfDisposed();
+        return JSEval.Evaluate(this, source, fileName, JSEval.EvalFlags.Global | JSEval.EvalFlags.CompileOnly);
+    }
+
+    #endregion
+
     #region Exception Handling
 
     /// <summary>
@@ -1096,13 +1155,12 @@ public sealed class JSContext : IDisposable
 
     private void InitializeFunctionConstructor()
     {
-        var objectProto = GetClassPrototype(JSClassId.Object)!;
         var functionProto = GetClassPrototype(JSClassId.CFunction)!;
 
         JSValue FunctionCtor(JSValue thisVal, JSValue[] args)
         {
-            // Not yet supported to compile from strings
-            return ThrowTypeError("Function constructor from string is not supported");
+            // Delegate to JSEval for dynamic function creation
+            return JSEval.CreateFunctionFromStrings(this, args);
         }
 
         var functionCtorFunc = new JSFunction(FunctionCtor, "Function", 1, functionProto);
@@ -1113,6 +1171,10 @@ public sealed class JSContext : IDisposable
 
         // Attach global Function
         _globalObject.Set("Function", JSValue.FromObject(functionCtorFunc));
+
+        // Also initialize the global eval function
+        var evalFunc = JSEval.CreateEvalFunction(this);
+        _globalObject.Set("eval", JSValue.FromObject(evalFunc));
     }
 
     private void InitializeErrorConstructors()
