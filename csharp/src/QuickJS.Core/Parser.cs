@@ -46,9 +46,12 @@ public sealed class Parser
 {
     private readonly Lexer _lexer;
     private readonly AtomTable _atoms;
+    private readonly string _fileName;
+    private readonly string _source;
     private Token _currentToken;
     private JSFunctionDef _currentFunction;
     private bool _isModule;
+    private readonly DiagnosticBag _diagnostics = new DiagnosticBag();
 
     /// <summary>
     /// Creates a new parser.
@@ -59,7 +62,9 @@ public sealed class Parser
     /// <param name="isModule">True if parsing as ES module, false for script mode.</param>
     public Parser(string source, string fileName, AtomTable atoms, bool isModule = false)
     {
-        _lexer = new Lexer(source, fileName);
+        _source = source ?? throw new ArgumentNullException(nameof(source));
+        _fileName = fileName ?? "<anonymous>";
+        _lexer = new Lexer(source, _fileName);
         _atoms = atoms ?? throw new ArgumentNullException(nameof(atoms));
         _currentToken = _lexer.NextToken();
         _currentFunction = new JSFunctionDef();
@@ -80,6 +85,11 @@ public sealed class Parser
     /// Gets the atom table.
     /// </summary>
     public AtomTable Atoms => _atoms;
+
+    /// <summary>
+    /// Gets the diagnostics collected during parsing.
+    /// </summary>
+    public DiagnosticBag Diagnostics => _diagnostics;
 
     #region Token Handling
 
@@ -174,15 +184,62 @@ public sealed class Parser
     }
 
     /// <summary>
+    /// Reports a syntax error with detailed diagnostic information.
+    /// </summary>
+    /// <param name="code">The error code (e.g., "JS2001").</param>
+    /// <param name="message">The error message.</param>
+    /// <param name="location">The source location of the error.</param>
+    private JSSyntaxError ReportError(string code, string message, SourceLocation location)
+    {
+        // Add to diagnostics
+        var context = ParserErrorMessages.GetSourceContext(_source, (location.Line - 1) * 80 + location.Column);
+        var diagnostic = new ParseDiagnostic(
+            DiagnosticSeverity.Error,
+            code,
+            message,
+            location,
+            _fileName,
+            context);
+        _diagnostics.Add(diagnostic);
+
+        // Return the exception (caller can throw it)
+        return new JSSyntaxError(message, location);
+    }
+
+    /// <summary>
+    /// Reports a syntax error at the current token position.
+    /// </summary>
+    private JSSyntaxError ReportError(string code, string message)
+    {
+        return ReportError(code, message, _currentToken.Start);
+    }
+
+    /// <summary>
+    /// Reports an "unexpected token" error at the current position.
+    /// </summary>
+    private JSSyntaxError ReportUnexpectedToken()
+    {
+        var message = ParserErrorMessages.UnexpectedToken(_currentToken.Type, _currentToken.Value);
+        return ReportError(ParseErrorCode.UnexpectedToken, message);
+    }
+
+    /// <summary>
+    /// Reports an "expected X, got Y" error at the current position.
+    /// </summary>
+    private JSSyntaxError ReportExpectedToken(TokenType expected)
+    {
+        var message = ParserErrorMessages.ExpectedGot(expected, _currentToken.Type, _currentToken.Value);
+        return ReportError(ParseErrorCode.ExpectedToken, message);
+    }
+
+    /// <summary>
     /// Consumes the current token if it matches, otherwise throws.
     /// </summary>
     public void Expect(TokenType type)
     {
         if (!Check(type))
         {
-            throw new JSSyntaxError(
-                $"Expected {type} but got {_currentToken.Type}",
-                _currentToken.Start);
+            throw ReportExpectedToken(type);
         }
         NextToken();
     }
@@ -774,9 +831,9 @@ public sealed class Parser
         {
             if (hasUnaryPrefix)
             {
-                throw new JSSyntaxError(
-                    "Unary operator before ** requires parentheses",
-                    _currentToken.Start);
+                throw ReportError(
+                    ParseErrorCode.UnexpectedToken,
+                    "Unary operator before '**' requires parentheses");
             }
             ParseExponentiationExpression(flags | ParseFlags.PowAllowed);
             EmitOp(OpCode.Pow);
@@ -922,9 +979,9 @@ public sealed class Parser
             {
                 if (!Check(TokenType.Identifier))
                 {
-                    throw new JSSyntaxError(
-                        $"Expected identifier after '.', got {_currentToken.Type}",
-                        _currentToken.Start);
+                    throw ReportError(
+                        ParseErrorCode.ExpectedIdentifier,
+                        ParserErrorMessages.ExpectedIdentifier(_currentToken.Type));
                 }
                 var name = (string)_currentToken.Value!;
                 NextToken(); // consume the identifier
@@ -1085,9 +1142,7 @@ public sealed class Parser
                 break;
 
             default:
-                throw new JSSyntaxError(
-                    $"Unexpected token: {_currentToken.Type}",
-                    _currentToken.Start);
+                throw ReportUnexpectedToken();
         }
     }
 
@@ -1274,16 +1329,16 @@ public sealed class Parser
             }
             else
             {
-                throw new JSSyntaxError(
-                    $"Expected parameter name, got {_currentToken.Type}",
-                    _currentToken.Start);
+                throw ReportError(
+                    ParseErrorCode.ExpectedIdentifier,
+                    ParserErrorMessages.ExpectedIdentifier(_currentToken.Type));
             }
 
             if (isRest && !Check(TokenType.RightParen))
             {
-                throw new JSSyntaxError(
-                    "Rest parameter must be last",
-                    _currentToken.Start);
+                throw ReportError(
+                    ParseErrorCode.RestParameterNotLast,
+                    "Rest parameter must be last");
             }
 
             if (!Match(TokenType.Comma))
