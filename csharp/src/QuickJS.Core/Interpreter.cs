@@ -32,6 +32,11 @@ public sealed class Interpreter
     private int _stackPointer;
     private readonly int _maxStackSize;
 
+    /// <summary>
+    /// The current call frame containing locals, args, and var refs.
+    /// </summary>
+    private CallFrame? _currentFrame;
+
     #endregion
 
     #region Constructor
@@ -82,6 +87,15 @@ public sealed class Interpreter
     /// Gets whether an exception has been thrown.
     /// </summary>
     public bool HasException => _context.HasException;
+
+    /// <summary>
+    /// Gets or sets the current call frame.
+    /// </summary>
+    public CallFrame? CurrentFrame
+    {
+        get => _currentFrame;
+        set => _currentFrame = value;
+    }
 
     #endregion
 
@@ -1257,6 +1271,607 @@ public sealed class Interpreter
 
     #endregion
 
+    #region Variable Access Operations
+
+    /// <summary>
+    /// Gets a local variable by index: -> value
+    /// </summary>
+    /// <param name="index">The local variable index.</param>
+    public void GetLoc(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        Push(_currentFrame.GetLocal(index));
+    }
+
+    /// <summary>
+    /// Puts (assigns) a local variable by index: value ->
+    /// </summary>
+    /// <param name="index">The local variable index.</param>
+    public void PutLoc(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var value = Pop();
+        _currentFrame.SetLocal(index, value);
+    }
+
+    /// <summary>
+    /// Sets a local variable, keeping value on stack: value -> value
+    /// </summary>
+    /// <param name="index">The local variable index.</param>
+    public void SetLoc(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var value = Peek();
+        _currentFrame.SetLocal(index, value);
+    }
+
+    /// <summary>
+    /// Gets an argument by index: -> value
+    /// </summary>
+    /// <param name="index">The argument index.</param>
+    public void GetArg(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        Push(_currentFrame.GetArg(index));
+    }
+
+    /// <summary>
+    /// Puts (assigns) an argument by index: value ->
+    /// </summary>
+    /// <param name="index">The argument index.</param>
+    public void PutArg(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var value = Pop();
+        _currentFrame.SetArg(index, value);
+    }
+
+    /// <summary>
+    /// Sets an argument, keeping value on stack: value -> value
+    /// </summary>
+    /// <param name="index">The argument index.</param>
+    public void SetArg(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var value = Peek();
+        _currentFrame.SetArg(index, value);
+    }
+
+    /// <summary>
+    /// Gets a closure variable by index: -> value
+    /// </summary>
+    /// <param name="index">The var ref index.</param>
+    public void GetVarRef(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        Push(_currentFrame.GetVarRefValue(index));
+    }
+
+    /// <summary>
+    /// Puts (assigns) a closure variable by index: value ->
+    /// </summary>
+    /// <param name="index">The var ref index.</param>
+    public void PutVarRef(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var value = Pop();
+        var varRef = _currentFrame.GetVarRef(index);
+        if (varRef != null)
+        {
+            if (varRef.IsConst)
+            {
+                _context.ThrowTypeError("Assignment to constant variable");
+                return;
+            }
+            varRef.Value = value;
+        }
+    }
+
+    /// <summary>
+    /// Sets a closure variable, keeping value on stack: value -> value
+    /// </summary>
+    /// <param name="index">The var ref index.</param>
+    public void SetVarRef(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var value = Peek();
+        var varRef = _currentFrame.GetVarRef(index);
+        if (varRef != null)
+        {
+            if (varRef.IsConst)
+            {
+                _context.ThrowTypeError("Assignment to constant variable");
+                return;
+            }
+            varRef.Value = value;
+        }
+    }
+
+    /// <summary>
+    /// Gets a closure variable with TDZ check: -> value
+    /// </summary>
+    /// <param name="index">The var ref index.</param>
+    public void GetVarRefCheck(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var varRef = _currentFrame.GetVarRef(index);
+        if (varRef == null)
+        {
+            Push(JSValue.Undefined);
+            return;
+        }
+        var value = varRef.Value;
+        if (value.IsUninitialized)
+        {
+            _context.ThrowReferenceError("Cannot access variable before initialization");
+            return;
+        }
+        Push(value);
+    }
+
+    /// <summary>
+    /// Puts a closure variable with TDZ check: value ->
+    /// </summary>
+    /// <param name="index">The var ref index.</param>
+    public void PutVarRefCheck(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var value = Pop();
+        var varRef = _currentFrame.GetVarRef(index);
+        if (varRef == null)
+        {
+            return;
+        }
+        if (varRef.Value.IsUninitialized)
+        {
+            _context.ThrowReferenceError("Cannot access variable before initialization");
+            return;
+        }
+        if (varRef.IsConst)
+        {
+            _context.ThrowTypeError("Assignment to constant variable");
+            return;
+        }
+        varRef.Value = value;
+    }
+
+    /// <summary>
+    /// Gets a local variable with TDZ check: -> value
+    /// </summary>
+    /// <param name="index">The local variable index.</param>
+    public void GetLocCheck(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var value = _currentFrame.GetLocal(index);
+        if (value.IsUninitialized)
+        {
+            _context.ThrowReferenceError("Cannot access variable before initialization");
+            return;
+        }
+        Push(value);
+    }
+
+    /// <summary>
+    /// Puts a local variable with TDZ check: value ->
+    /// </summary>
+    /// <param name="index">The local variable index.</param>
+    public void PutLocCheck(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var currentValue = _currentFrame.GetLocal(index);
+        if (currentValue.IsUninitialized)
+        {
+            _context.ThrowReferenceError("Cannot access variable before initialization");
+            return;
+        }
+        var value = Pop();
+        _currentFrame.SetLocal(index, value);
+    }
+
+    /// <summary>
+    /// Initializes a local variable (for let/const): value ->
+    /// </summary>
+    /// <param name="index">The local variable index.</param>
+    public void PutLocCheckInit(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var value = Pop();
+        _currentFrame.SetLocal(index, value);
+    }
+
+    /// <summary>
+    /// Marks a local variable as uninitialized (for TDZ).
+    /// </summary>
+    /// <param name="index">The local variable index.</param>
+    public void SetLocUninitialized(int index)
+    {
+        if (_currentFrame == null)
+        {
+            return;
+        }
+        _currentFrame.SetLocal(index, JSValue.Uninitialized);
+    }
+
+    #endregion
+
+    #region Property Access Operations
+
+    /// <summary>
+    /// Gets a property by name: obj -> value
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    public void GetField(string propertyName)
+    {
+        if (_stackPointer < 1)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var obj = _stack[_stackPointer - 1];
+
+        // Get property from object
+        var value = GetPropertyValue(obj, propertyName);
+        _stack[_stackPointer - 1] = value;
+    }
+
+    /// <summary>
+    /// Gets a property by name, keeping object: obj -> obj value
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    public void GetField2(string propertyName)
+    {
+        if (_stackPointer < 1)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var obj = _stack[_stackPointer - 1];
+
+        // Get property from object
+        var value = GetPropertyValue(obj, propertyName);
+        Push(value);
+    }
+
+    /// <summary>
+    /// Sets a property by name: obj value ->
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    public void PutField(string propertyName)
+    {
+        if (_stackPointer < 2)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var value = _stack[_stackPointer - 1];
+        var obj = _stack[_stackPointer - 2];
+        _stackPointer -= 2;
+
+        SetPropertyValue(obj, propertyName, value);
+    }
+
+    /// <summary>
+    /// Gets an array element by index: obj index -> value
+    /// </summary>
+    public void GetArrayEl()
+    {
+        if (_stackPointer < 2)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var index = _stack[_stackPointer - 1];
+        var obj = _stack[_stackPointer - 2];
+        _stackPointer--;
+
+        var value = GetElementValue(obj, index);
+        _stack[_stackPointer - 1] = value;
+    }
+
+    /// <summary>
+    /// Gets an array element, keeping object: obj index -> obj value
+    /// </summary>
+    public void GetArrayEl2()
+    {
+        if (_stackPointer < 2)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var index = _stack[_stackPointer - 1];
+        var obj = _stack[_stackPointer - 2];
+
+        var value = GetElementValue(obj, index);
+        _stack[_stackPointer - 1] = value;
+    }
+
+    /// <summary>
+    /// Sets an array element: obj index value ->
+    /// </summary>
+    public void PutArrayEl()
+    {
+        if (_stackPointer < 3)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var value = _stack[_stackPointer - 1];
+        var index = _stack[_stackPointer - 2];
+        var obj = _stack[_stackPointer - 3];
+        _stackPointer -= 3;
+
+        SetElementValue(obj, index, value);
+    }
+
+    /// <summary>
+    /// Defines a field on an object: obj value -> obj
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    public void DefineField(string propertyName)
+    {
+        if (_stackPointer < 2)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var value = Pop();
+        var obj = Peek();
+
+        SetPropertyValue(obj, propertyName, value);
+    }
+
+    /// <summary>
+    /// Gets a property value from an object.
+    /// </summary>
+    private JSValue GetPropertyValue(JSValue obj, string propertyName)
+    {
+        // Handle null/undefined
+        if (obj.IsNull || obj.IsUndefined)
+        {
+            _context.ThrowTypeError($"Cannot read property '{propertyName}' of {(obj.IsNull ? "null" : "undefined")}");
+            return JSValue.Undefined;
+        }
+
+        // Object property access
+        if (obj.IsObject)
+        {
+            var jsObj = obj.AsObject();
+            if (jsObj != null)
+            {
+                return jsObj.Get(propertyName);
+            }
+        }
+
+        // String length property
+        if (obj.IsString && propertyName == "length")
+        {
+            if (obj.TryGetString(out string? str))
+            {
+                return JSValue.FromInt32(str.Length);
+            }
+            return JSValue.FromInt32(0);
+        }
+
+        // String index access
+        if (obj.IsString && uint.TryParse(propertyName, out uint strIndex))
+        {
+            if (obj.TryGetString(out string? str) && strIndex < str.Length)
+            {
+                return JSValue.FromString(str[(int)strIndex].ToString());
+            }
+            return JSValue.Undefined;
+        }
+
+        // TODO: Primitive wrapper objects for number, boolean, etc.
+        return JSValue.Undefined;
+    }
+
+    /// <summary>
+    /// Sets a property value on an object.
+    /// </summary>
+    private void SetPropertyValue(JSValue obj, string propertyName, JSValue value)
+    {
+        // Handle null/undefined
+        if (obj.IsNull || obj.IsUndefined)
+        {
+            _context.ThrowTypeError($"Cannot set property '{propertyName}' of {(obj.IsNull ? "null" : "undefined")}");
+            return;
+        }
+
+        // Object property access
+        if (obj.IsObject)
+        {
+            var jsObj = obj.AsObject();
+            if (jsObj != null)
+            {
+                jsObj.Set(propertyName, value);
+            }
+        }
+
+        // Primitives - silently ignore (or throw in strict mode)
+        // TODO: Handle strict mode
+    }
+
+    /// <summary>
+    /// Gets an element by index from an object or array.
+    /// </summary>
+    private JSValue GetElementValue(JSValue obj, JSValue index)
+    {
+        // Handle null/undefined
+        if (obj.IsNull || obj.IsUndefined)
+        {
+            _context.ThrowTypeError($"Cannot read property of {(obj.IsNull ? "null" : "undefined")}");
+            return JSValue.Undefined;
+        }
+
+        // Fast path: integer index on object
+        if (index.IsInt && obj.IsObject)
+        {
+            var jsObj = obj.AsObject();
+            if (jsObj != null)
+            {
+                int intIndex = index.ToInt32();
+                if (intIndex >= 0)
+                {
+                    return jsObj.Get((uint)intIndex);
+                }
+                // Negative index - convert to string key
+                return jsObj.Get(intIndex.ToString());
+            }
+        }
+
+        // Fast path: integer index on string
+        if (index.IsInt && obj.IsString)
+        {
+            int intIndex = index.ToInt32();
+            if (obj.TryGetString(out string? str) && intIndex >= 0 && intIndex < str.Length)
+            {
+                return JSValue.FromString(str[intIndex].ToString());
+            }
+            return JSValue.Undefined;
+        }
+
+        // Convert index to property key
+        string propertyKey = JSValueConversion.ToString(index);
+
+        // Try as numeric index first
+        if (uint.TryParse(propertyKey, out uint uintIndex))
+        {
+            if (obj.IsObject)
+            {
+                var jsObj = obj.AsObject();
+                if (jsObj != null)
+                {
+                    return jsObj.Get(uintIndex);
+                }
+            }
+            if (obj.IsString)
+            {
+                if (obj.TryGetString(out string? str) && uintIndex < str.Length)
+                {
+                    return JSValue.FromString(str[(int)uintIndex].ToString());
+                }
+                return JSValue.Undefined;
+            }
+        }
+
+        // String property access
+        return GetPropertyValue(obj, propertyKey);
+    }
+
+    /// <summary>
+    /// Sets an element by index on an object or array.
+    /// </summary>
+    private void SetElementValue(JSValue obj, JSValue index, JSValue value)
+    {
+        // Handle null/undefined
+        if (obj.IsNull || obj.IsUndefined)
+        {
+            _context.ThrowTypeError($"Cannot set property of {(obj.IsNull ? "null" : "undefined")}");
+            return;
+        }
+
+        // Fast path: integer index on object
+        if (index.IsInt && obj.IsObject)
+        {
+            var jsObj = obj.AsObject();
+            if (jsObj != null)
+            {
+                int intIndex = index.ToInt32();
+                if (intIndex >= 0)
+                {
+                    jsObj.Set((uint)intIndex, value);
+                    return;
+                }
+                // Negative index - convert to string key
+                jsObj.Set(intIndex.ToString(), value);
+                return;
+            }
+        }
+
+        // Convert index to property key
+        string propertyKey = JSValueConversion.ToString(index);
+
+        // Try as numeric index first
+        if (uint.TryParse(propertyKey, out uint uintIndex) && obj.IsObject)
+        {
+            var jsObj = obj.AsObject();
+            if (jsObj != null)
+            {
+                jsObj.Set(uintIndex, value);
+                return;
+            }
+        }
+
+        // String property access
+        SetPropertyValue(obj, propertyKey, value);
+    }
+
+    #endregion
+
     #region Push Operations
 
     /// <summary>
@@ -1495,6 +2110,17 @@ public sealed class Interpreter
                 IsUndefinedOrNull();
                 return true;
 
+            // Array element access (no operands)
+            case OpCode.GetArrayEl:
+                GetArrayEl();
+                return true;
+            case OpCode.GetArrayEl2:
+                GetArrayEl2();
+                return true;
+            case OpCode.PutArrayEl:
+                PutArrayEl();
+                return true;
+
             default:
                 // Unhandled opcode
                 _context.ThrowTypeError($"Unhandled opcode: {opcode}");
@@ -1533,6 +2159,423 @@ public sealed class Interpreter
                              (bytecode[pc + 3] << 24);
                     pc += 4;
                     PushI32(i32);
+                    break;
+
+                // Local variable access (u16 index)
+                case OpCode.GetLoc:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        GetLoc(idx);
+                    }
+                    break;
+
+                case OpCode.PutLoc:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        PutLoc(idx);
+                    }
+                    break;
+
+                case OpCode.SetLoc:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        SetLoc(idx);
+                    }
+                    break;
+
+                // Argument access (u16 index)
+                case OpCode.GetArg:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        GetArg(idx);
+                    }
+                    break;
+
+                case OpCode.PutArg:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        PutArg(idx);
+                    }
+                    break;
+
+                case OpCode.SetArg:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        SetArg(idx);
+                    }
+                    break;
+
+                // Var ref access (u16 index)
+                case OpCode.GetVarRef:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        GetVarRef(idx);
+                    }
+                    break;
+
+                case OpCode.PutVarRef:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        PutVarRef(idx);
+                    }
+                    break;
+
+                case OpCode.SetVarRef:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        SetVarRef(idx);
+                    }
+                    break;
+
+                // TDZ-checked access
+                case OpCode.GetLocCheck:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        GetLocCheck(idx);
+                    }
+                    break;
+
+                case OpCode.PutLocCheck:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        PutLocCheck(idx);
+                    }
+                    break;
+
+                case OpCode.PutLocCheckInit:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        PutLocCheckInit(idx);
+                    }
+                    break;
+
+                case OpCode.GetVarRefCheck:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        GetVarRefCheck(idx);
+                    }
+                    break;
+
+                case OpCode.PutVarRefCheck:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        PutVarRefCheck(idx);
+                    }
+                    break;
+
+                case OpCode.SetLocUninitialized:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
+                        pc += 2;
+                        SetLocUninitialized(idx);
+                    }
+                    break;
+
+                // Property access (u32 atom)
+                case OpCode.GetField:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        uint atom = (uint)(bytecode[pc] |
+                                          (bytecode[pc + 1] << 8) |
+                                          (bytecode[pc + 2] << 16) |
+                                          (bytecode[pc + 3] << 24));
+                        pc += 4;
+                        string propName = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        GetField(propName);
+                    }
+                    break;
+
+                case OpCode.GetField2:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        uint atom = (uint)(bytecode[pc] |
+                                          (bytecode[pc + 1] << 8) |
+                                          (bytecode[pc + 2] << 16) |
+                                          (bytecode[pc + 3] << 24));
+                        pc += 4;
+                        string propName = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        GetField2(propName);
+                    }
+                    break;
+
+                case OpCode.PutField:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        uint atom = (uint)(bytecode[pc] |
+                                          (bytecode[pc + 1] << 8) |
+                                          (bytecode[pc + 2] << 16) |
+                                          (bytecode[pc + 3] << 24));
+                        pc += 4;
+                        string propName = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        PutField(propName);
+                    }
+                    break;
+
+                case OpCode.DefineField:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        uint atom = (uint)(bytecode[pc] |
+                                          (bytecode[pc + 1] << 8) |
+                                          (bytecode[pc + 2] << 16) |
+                                          (bytecode[pc + 3] << 24));
+                        pc += 4;
+                        string propName = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        DefineField(propName);
+                    }
+                    break;
+
+                // Short opcodes for common local indices
+                case OpCode.GetLoc0:
+                    GetLoc(0);
+                    break;
+                case OpCode.GetLoc1:
+                    GetLoc(1);
+                    break;
+                case OpCode.GetLoc2:
+                    GetLoc(2);
+                    break;
+                case OpCode.GetLoc3:
+                    GetLoc(3);
+                    break;
+                case OpCode.PutLoc0:
+                    PutLoc(0);
+                    break;
+                case OpCode.PutLoc1:
+                    PutLoc(1);
+                    break;
+                case OpCode.PutLoc2:
+                    PutLoc(2);
+                    break;
+                case OpCode.PutLoc3:
+                    PutLoc(3);
+                    break;
+                case OpCode.SetLoc0:
+                    SetLoc(0);
+                    break;
+                case OpCode.SetLoc1:
+                    SetLoc(1);
+                    break;
+                case OpCode.SetLoc2:
+                    SetLoc(2);
+                    break;
+                case OpCode.SetLoc3:
+                    SetLoc(3);
+                    break;
+
+                // Short opcodes for common arg indices
+                case OpCode.GetArg0:
+                    GetArg(0);
+                    break;
+                case OpCode.GetArg1:
+                    GetArg(1);
+                    break;
+                case OpCode.GetArg2:
+                    GetArg(2);
+                    break;
+                case OpCode.GetArg3:
+                    GetArg(3);
+                    break;
+                case OpCode.PutArg0:
+                    PutArg(0);
+                    break;
+                case OpCode.PutArg1:
+                    PutArg(1);
+                    break;
+                case OpCode.PutArg2:
+                    PutArg(2);
+                    break;
+                case OpCode.PutArg3:
+                    PutArg(3);
+                    break;
+                case OpCode.SetArg0:
+                    SetArg(0);
+                    break;
+                case OpCode.SetArg1:
+                    SetArg(1);
+                    break;
+                case OpCode.SetArg2:
+                    SetArg(2);
+                    break;
+                case OpCode.SetArg3:
+                    SetArg(3);
+                    break;
+
+                // Short opcodes for common var ref indices
+                case OpCode.GetVarRef0:
+                    GetVarRef(0);
+                    break;
+                case OpCode.GetVarRef1:
+                    GetVarRef(1);
+                    break;
+                case OpCode.GetVarRef2:
+                    GetVarRef(2);
+                    break;
+                case OpCode.GetVarRef3:
+                    GetVarRef(3);
+                    break;
+                case OpCode.PutVarRef0:
+                    PutVarRef(0);
+                    break;
+                case OpCode.PutVarRef1:
+                    PutVarRef(1);
+                    break;
+                case OpCode.PutVarRef2:
+                    PutVarRef(2);
+                    break;
+                case OpCode.PutVarRef3:
+                    PutVarRef(3);
+                    break;
+                case OpCode.SetVarRef0:
+                    SetVarRef(0);
+                    break;
+                case OpCode.SetVarRef1:
+                    SetVarRef(1);
+                    break;
+                case OpCode.SetVarRef2:
+                    SetVarRef(2);
+                    break;
+                case OpCode.SetVarRef3:
+                    SetVarRef(3);
+                    break;
+
+                // u8 short opcodes
+                case OpCode.GetLoc8:
+                    {
+                        if (pc >= bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc++];
+                        GetLoc(idx);
+                    }
+                    break;
+                case OpCode.PutLoc8:
+                    {
+                        if (pc >= bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc++];
+                        PutLoc(idx);
+                    }
+                    break;
+                case OpCode.SetLoc8:
+                    {
+                        if (pc >= bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc++];
+                        SetLoc(idx);
+                    }
                     break;
 
                 default:

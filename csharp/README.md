@@ -51,11 +51,11 @@ Use `#if` directives when needed:
 | Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
 | Phase 5: Runtime Objects | ✅ Complete | 4/4 | ~500 |
-| Phase 6: VM & Interpreter | 🔄 In Progress | 2/7 | ~560 |
+| Phase 6: VM & Interpreter | 🔄 In Progress | 3/7 | ~684 |
 
-**Total Tests: 3510** (all passing, 0 skipped)
+**Total Tests: 3634** (all passing, 0 skipped)
 
-**Latest Commit**: `step-6.2-interpreter-basic`
+**Latest Commit**: `step-6.3-variables-properties`
 
 # Detailed Implementation Plan
 
@@ -498,22 +498,23 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 6.4: Interpreter - Variables and Properties
-**Commit**: `step-6.4-interpreter-variables`  
-**Doc**: `docs/35-variables-properties.md`
+### Step 6.3: Interpreter - Variables and Properties
+**Commit**: `step-6.3-variables-properties`  
+**Doc**: `docs/27-variables-properties.md`
 
-- [ ] Implement variable load/store opcodes
-- [ ] Implement property get/set opcodes
-- [ ] Implement global variable access
-- [ ] Write variable tests
+- [x] Create `CallFrame` class for call-level state management
+- [x] Implement variable load/store opcodes (GetLocal, PutLocal, GetArg, PutArg, GetVarRef, PutVarRef)
+- [x] Implement property get/set opcodes (GetField, PutField, GetArrayEl, PutArrayEl)
+- [x] Extend `Execute()` method to handle opcodes with operands
+- [x] Write variable and property tests (~124 new tests)
 
-**Learning Goals**: Variable resolution at runtime
+**Learning Goals**: Variable resolution at runtime, property access
 
 ---
 
-### Step 6.5: Interpreter - Control Flow
-**Commit**: `step-6.5-interpreter-control`  
-**Doc**: `docs/36-interpreter-control-flow.md`
+### Step 6.4: Interpreter - Control Flow
+**Commit**: `step-6.4-interpreter-control`  
+**Doc**: `docs/28-interpreter-control-flow.md`
 
 - [ ] Implement jump opcodes
 - [ ] Implement conditional jumps
@@ -524,9 +525,9 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 6.6: Interpreter - Function Calls
-**Commit**: `step-6.6-interpreter-calls`  
-**Doc**: `docs/37-function-calls.md`
+### Step 6.5: Interpreter - Function Calls
+**Commit**: `step-6.5-interpreter-calls`  
+**Doc**: `docs/29-function-calls.md`
 
 - [ ] Implement call stack frames
 - [ ] Implement call/return opcodes
@@ -538,9 +539,9 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 6.7: Interpreter - Closures
-**Commit**: `step-6.7-interpreter-closures`  
-**Doc**: `docs/38-closures.md`
+### Step 6.6: Interpreter - Closures
+**Commit**: `step-6.6-interpreter-closures`  
+**Doc**: `docs/30-closures.md`
 
 - [ ] Implement upvalue handling
 - [ ] Implement closure creation
@@ -551,9 +552,9 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 6.8: Interpreter - Exceptions
-**Commit**: `step-6.8-interpreter-exceptions`  
-**Doc**: `docs/39-exception-handling-runtime.md`
+### Step 6.7: Interpreter - Exceptions
+**Commit**: `step-6.7-interpreter-exceptions`  
+**Doc**: `docs/31-exception-handling-runtime.md`
 
 - [ ] Implement exception tables lookup
 - [ ] Implement stack unwinding
