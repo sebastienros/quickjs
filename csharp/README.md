@@ -50,12 +50,12 @@ Use `#if` directives when needed:
 | Phase 2: Lexer | ✅ Complete | 2/2 | ~100 |
 | Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
-| Phase 5: Runtime Objects | 🔄 In Progress | 1/4 | ~280 |
+| Phase 5: Runtime Objects | 🔄 In Progress | 2/4 | ~360 |
 | Phase 6: VM & Interpreter | ⏳ Planned | 0/7 | - |
 
-**Total Tests: 2554** (all passing, 0 skipped)
+**Total Tests: 2634** (all passing, 0 skipped)
 
-**Latest Commit**: `step-5.1-jsobject`
+**Latest Commit**: `step-5.2-prototypes`
 
 # Detailed Implementation Plan
 
@@ -422,17 +422,19 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 5.2: Prototype Chain
+### Step 5.2: Prototype Chain ✅
 **Commit**: `step-5.2-prototypes`  
 **Doc**: `docs/22-prototype-chain.md`
 
-- [ ] Implement Object.getPrototypeOf / setPrototypeOf
-- [ ] Implement Object.create
-- [ ] Handle null prototype case
-- [ ] Implement immutable prototype flag
-- [ ] Write prototype tests
+- [x] Implement SetPrototype with validation and cycle detection
+- [x] Implement SetPrototypeOrThrow for error handling
+- [x] Implement Object.create with optional properties
+- [x] Implement Object.assign for copying properties
+- [x] Implement Object.keys/values/entries/fromEntries
+- [x] Add immutable prototype flag for built-in objects
+- [x] Write comprehensive prototype tests (40 tests)
 
-**Learning Goals**: Prototype-based inheritance
+**Learning Goals**: Prototype-based inheritance, Object static methods
 
 ---
 

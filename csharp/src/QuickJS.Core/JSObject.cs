@@ -51,6 +51,10 @@ public class JSObject
     // Extensibility flag - if false, no new properties can be added.
     private bool _extensible;
 
+    // Immutable prototype flag - if true, the prototype cannot be changed.
+    // Used for Object.prototype and similar built-in objects.
+    private bool _hasImmutablePrototype;
+
     // Optional internal data for primitive wrappers and special objects
     private JSValue _internalValue;
 
@@ -68,6 +72,7 @@ public class JSObject
         _prototype = prototype;
         _classId = classId;
         _extensible = true;
+        _hasImmutablePrototype = false;
         _properties = new Dictionary<string, PropertyDescriptor>();
         _internalValue = JSValue.Undefined;
     }
@@ -84,18 +89,22 @@ public class JSObject
     /// <summary>
     /// Gets or sets the prototype of this object.
     /// </summary>
-    /// <exception cref="InvalidOperationException">
-    /// Thrown if trying to set the prototype when the object has an immutable prototype.
-    /// </exception>
+    /// <remarks>
+    /// Setting the prototype uses <see cref="SetPrototype"/> internally.
+    /// The setter will not throw on failure; use <see cref="SetPrototype"/> directly
+    /// if you need to check the return value.
+    /// </remarks>
     public JSObject? Prototype
     {
         get => _prototype;
-        set
-        {
-            // TODO: Add immutable prototype check for special objects
-            _prototype = value;
-        }
+        set => SetPrototype(value);
     }
+
+    /// <summary>
+    /// Gets a value indicating whether this object has an immutable prototype.
+    /// Objects with immutable prototypes cannot have their prototype changed.
+    /// </summary>
+    public bool HasImmutablePrototype => _hasImmutablePrototype;
 
     /// <summary>
     /// Gets a value indicating whether this object is extensible
@@ -787,6 +796,294 @@ public class JSObject
 
             return true;
         }
+    }
+
+    #endregion
+
+    #region Prototype Operations
+
+    /// <summary>
+    /// Sets the prototype of this object.
+    /// </summary>
+    /// <param name="prototype">The new prototype, or null for no prototype.</param>
+    /// <returns>
+    /// True if the prototype was set successfully.
+    /// False if the object has an immutable prototype, is not extensible,
+    /// or if setting the prototype would create a cycle.
+    /// </returns>
+    /// <remarks>
+    /// This method implements the [[SetPrototypeOf]] internal method from the ECMAScript spec.
+    /// It performs the following checks:
+    /// <list type="number">
+    /// <item><description>If the prototype is the same as the current one, return true.</description></item>
+    /// <item><description>If the object has an immutable prototype, return false.</description></item>
+    /// <item><description>If the object is not extensible, return false.</description></item>
+    /// <item><description>If setting the prototype would create a cycle, return false.</description></item>
+    /// </list>
+    /// </remarks>
+    public bool SetPrototype(JSObject? prototype)
+    {
+        // Same prototype - no change needed
+        if (ReferenceEquals(_prototype, prototype))
+        {
+            return true;
+        }
+
+        // Check for immutable prototype
+        if (_hasImmutablePrototype)
+        {
+            return false;
+        }
+
+        // Check extensibility
+        if (!_extensible)
+        {
+            return false;
+        }
+
+        // Check for circular prototype chain
+        if (prototype != null && WouldCreatePrototypeCycle(prototype))
+        {
+            return false;
+        }
+
+        _prototype = prototype;
+        return true;
+    }
+
+    /// <summary>
+    /// Sets the prototype of this object, throwing an exception on failure.
+    /// </summary>
+    /// <param name="prototype">The new prototype, or null for no prototype.</param>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown if the prototype cannot be set due to immutability, non-extensibility,
+    /// or if it would create a circular prototype chain.
+    /// </exception>
+    public void SetPrototypeOrThrow(JSObject? prototype)
+    {
+        // Same prototype - no change needed
+        if (ReferenceEquals(_prototype, prototype))
+        {
+            return;
+        }
+
+        // Check for immutable prototype
+        if (_hasImmutablePrototype)
+        {
+            throw new InvalidOperationException("Cannot set prototype: object has an immutable prototype.");
+        }
+
+        // Check extensibility
+        if (!_extensible)
+        {
+            throw new InvalidOperationException("Cannot set prototype: object is not extensible.");
+        }
+
+        // Check for circular prototype chain
+        if (prototype != null && WouldCreatePrototypeCycle(prototype))
+        {
+            throw new InvalidOperationException("Cannot set prototype: would create a circular prototype chain.");
+        }
+
+        _prototype = prototype;
+    }
+
+    /// <summary>
+    /// Checks if setting the specified object as this object's prototype would create a cycle.
+    /// </summary>
+    private bool WouldCreatePrototypeCycle(JSObject newPrototype)
+    {
+        var current = newPrototype;
+        while (current != null)
+        {
+            if (ReferenceEquals(current, this))
+            {
+                return true;
+            }
+            current = current._prototype;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Makes this object's prototype immutable.
+    /// Once set, the prototype cannot be changed.
+    /// </summary>
+    /// <remarks>
+    /// This is used for built-in objects like Object.prototype which
+    /// should not have their prototype modified.
+    /// </remarks>
+    internal void SetImmutablePrototype()
+    {
+        _hasImmutablePrototype = true;
+    }
+
+    /// <summary>
+    /// Gets the prototype of this object as a JSValue.
+    /// Returns JSValue.Null if this object has no prototype.
+    /// </summary>
+    /// <returns>A JSValue containing the prototype object, or JSValue.Null.</returns>
+    public JSValue GetPrototypeValue()
+    {
+        return _prototype != null ? JSValue.FromObject(_prototype) : JSValue.Null;
+    }
+
+    #endregion
+
+    #region Static Factory Methods
+
+    /// <summary>
+    /// Creates a new object with the specified prototype.
+    /// Equivalent to Object.create(proto).
+    /// </summary>
+    /// <param name="prototype">The prototype for the new object, or null for no prototype.</param>
+    /// <returns>A new JSObject with the specified prototype.</returns>
+    public static JSObject Create(JSObject? prototype)
+    {
+        return new JSObject(prototype);
+    }
+
+    /// <summary>
+    /// Creates a new object with the specified prototype and properties.
+    /// Equivalent to Object.create(proto, propertiesObject).
+    /// </summary>
+    /// <param name="prototype">The prototype for the new object, or null for no prototype.</param>
+    /// <param name="properties">
+    /// A dictionary of property names to descriptors to define on the new object.
+    /// </param>
+    /// <returns>A new JSObject with the specified prototype and properties.</returns>
+    public static JSObject Create(JSObject? prototype, IDictionary<string, PropertyDescriptor> properties)
+    {
+        var obj = new JSObject(prototype);
+
+        if (properties != null)
+        {
+            foreach (var kvp in properties)
+            {
+                obj.DefineProperty(kvp.Key, kvp.Value);
+            }
+        }
+
+        return obj;
+    }
+
+    /// <summary>
+    /// Assigns all enumerable own properties from one or more source objects to a target object.
+    /// Equivalent to Object.assign(target, ...sources).
+    /// </summary>
+    /// <param name="target">The target object to copy properties to.</param>
+    /// <param name="sources">One or more source objects to copy properties from.</param>
+    /// <returns>The target object.</returns>
+    public static JSObject Assign(JSObject target, params JSObject[] sources)
+    {
+        if (target == null)
+        {
+            throw new ArgumentNullException(nameof(target));
+        }
+
+        if (sources == null)
+        {
+            return target;
+        }
+
+        foreach (var source in sources)
+        {
+            if (source == null)
+            {
+                continue;
+            }
+
+            foreach (var name in source.GetOwnEnumerablePropertyNames())
+            {
+                var value = source.Get(name);
+                target.Set(name, value);
+            }
+
+            foreach (var index in source.GetOwnPropertyIndices())
+            {
+                var descriptor = source.GetOwnPropertyDescriptor(index);
+                if (descriptor != null && descriptor.IsEnumerable)
+                {
+                    target.Set(index, source.Get(index));
+                }
+            }
+        }
+
+        return target;
+    }
+
+    /// <summary>
+    /// Gets the names of all own enumerable string-keyed properties.
+    /// Equivalent to Object.keys(obj).
+    /// </summary>
+    /// <returns>An array of property names.</returns>
+    public string[] Keys()
+    {
+        var keys = new List<string>();
+        foreach (var kvp in _properties)
+        {
+            if (kvp.Value.IsEnumerable)
+            {
+                keys.Add(kvp.Key);
+            }
+        }
+        return keys.ToArray();
+    }
+
+    /// <summary>
+    /// Gets the values of all own enumerable string-keyed properties.
+    /// Equivalent to Object.values(obj).
+    /// </summary>
+    /// <returns>An array of property values.</returns>
+    public JSValue[] Values()
+    {
+        var values = new List<JSValue>();
+        foreach (var kvp in _properties)
+        {
+            if (kvp.Value.IsEnumerable)
+            {
+                values.Add(kvp.Value.IsDataDescriptor ? kvp.Value.Value : JSValue.Undefined);
+            }
+        }
+        return values.ToArray();
+    }
+
+    /// <summary>
+    /// Gets key-value pairs for all own enumerable string-keyed properties.
+    /// Equivalent to Object.entries(obj).
+    /// </summary>
+    /// <returns>An array of [key, value] tuples.</returns>
+    public (string Key, JSValue Value)[] Entries()
+    {
+        var entries = new List<(string, JSValue)>();
+        foreach (var kvp in _properties)
+        {
+            if (kvp.Value.IsEnumerable)
+            {
+                var value = kvp.Value.IsDataDescriptor ? kvp.Value.Value : JSValue.Undefined;
+                entries.Add((kvp.Key, value));
+            }
+        }
+        return entries.ToArray();
+    }
+
+    /// <summary>
+    /// Creates a new object from key-value pairs.
+    /// Equivalent to Object.fromEntries(iterable).
+    /// </summary>
+    /// <param name="entries">An enumerable of key-value pairs.</param>
+    /// <param name="prototype">Optional prototype for the new object.</param>
+    /// <returns>A new JSObject with properties from the entries.</returns>
+    public static JSObject FromEntries(IEnumerable<(string Key, JSValue Value)> entries, JSObject? prototype = null)
+    {
+        var obj = new JSObject(prototype);
+
+        foreach (var (key, value) in entries)
+        {
+            obj.Set(key, value);
+        }
+
+        return obj;
     }
 
     #endregion
