@@ -35,6 +35,9 @@ public sealed class CallFrame
     /// <summary>Argument storage.</summary>
     private readonly JSValue[] _args;
 
+    /// <summary>The actual number of arguments supplied by the caller.</summary>
+    private readonly int _actualArgCount;
+
     /// <summary>Closure variable references.</summary>
     private readonly JSVarRef[] _varRefs;
 
@@ -50,6 +53,9 @@ public sealed class CallFrame
     /// <summary>The parent call frame.</summary>
     private readonly CallFrame? _parent;
 
+    /// <summary>The function object being executed (if any).</summary>
+    private readonly JSFunction? _functionObject;
+
     #endregion
 
     #region Constructors
@@ -62,14 +68,19 @@ public sealed class CallFrame
     /// <param name="args">The arguments passed to the function.</param>
     /// <param name="varRefs">Closure variable references.</param>
     /// <param name="parent">The parent call frame, if any.</param>
+    /// <param name="actualArgCount">Actual number of arguments supplied by caller.</param>
+    /// <param name="functionObject">The function object being executed.</param>
     public CallFrame(
         JSFunctionDef? function,
         JSValue thisValue,
         JSValue[]? args = null,
         JSVarRef[]? varRefs = null,
-        CallFrame? parent = null)
+        CallFrame? parent = null,
+        int? actualArgCount = null,
+        JSFunction? functionObject = null)
     {
         _function = function;
+        _functionObject = functionObject;
         _thisValue = thisValue;
         _parent = parent;
 
@@ -86,6 +97,7 @@ public sealed class CallFrame
         // Initialize arguments
         int argCount = function?.ArgCount ?? 0;
         _args = args ?? (argCount > 0 ? new JSValue[argCount] : Array.Empty<JSValue>());
+        _actualArgCount = actualArgCount ?? args?.Length ?? _args.Length;
 
         // Pad arguments with undefined if not enough were passed
         if (_args.Length < argCount)
@@ -112,10 +124,12 @@ public sealed class CallFrame
     public CallFrame(int localCount = 0, int argCount = 0, int varRefCount = 0)
     {
         _function = null;
+        _functionObject = null;
         _thisValue = JSValue.Undefined;
         _parent = null;
         _locals = localCount > 0 ? new JSValue[localCount] : Array.Empty<JSValue>();
         _args = argCount > 0 ? new JSValue[argCount] : Array.Empty<JSValue>();
+        _actualArgCount = _args.Length;
         _varRefs = varRefCount > 0 ? new JSVarRef[varRefCount] : Array.Empty<JSVarRef>();
 
         // Initialize locals to undefined
@@ -145,6 +159,11 @@ public sealed class CallFrame
     /// Gets the function being executed, or null for global code.
     /// </summary>
     public JSFunctionDef? Function => _function;
+
+    /// <summary>
+    /// Gets the function object being executed, if available.
+    /// </summary>
+    public JSFunction? FunctionObject => _functionObject;
 
     /// <summary>
     /// Gets the parent call frame.
@@ -187,6 +206,11 @@ public sealed class CallFrame
     /// Gets the number of arguments.
     /// </summary>
     public int ArgCount => _args.Length;
+
+    /// <summary>
+    /// Gets the actual number of arguments supplied by the caller (before padding).
+    /// </summary>
+    public int ActualArgCount => _actualArgCount;
 
     /// <summary>
     /// Gets the number of var refs.

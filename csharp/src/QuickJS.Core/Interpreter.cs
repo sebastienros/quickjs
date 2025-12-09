@@ -140,7 +140,7 @@ public sealed class Interpreter
             var savedFrame = _currentFrame;
             try
             {
-                var frame = new CallFrame(fd, thisVal, args, func.VarRefs, savedFrame);
+                var frame = new CallFrame(fd, thisVal, args, func.VarRefs, savedFrame, actualArgCount: args.Length, functionObject: func);
                 _currentFrame = frame;
                 var result = Execute(fd);
                 if (isConstructor && !result.IsObject)
@@ -1626,7 +1626,13 @@ public sealed class Interpreter
 
         var obj = _stack[_stackPointer - 1];
 
-        // Get property from object
+        // Special arguments object handling
+        if (obj.IsObject && obj.AsObject() is JSArgumentsObject ao)
+        {
+            _stack[_stackPointer - 1] = ao.GetProperty(propertyName);
+            return;
+        }
+
         var value = GetPropertyValue(obj, propertyName);
         _stack[_stackPointer - 1] = value;
     }
@@ -1645,7 +1651,12 @@ public sealed class Interpreter
 
         var obj = _stack[_stackPointer - 1];
 
-        // Get property from object
+        if (obj.IsObject && obj.AsObject() is JSArgumentsObject ao)
+        {
+            Push(ao.GetProperty(propertyName));
+            return;
+        }
+
         var value = GetPropertyValue(obj, propertyName);
         Push(value);
     }
@@ -1666,6 +1677,12 @@ public sealed class Interpreter
         var obj = _stack[_stackPointer - 2];
         _stackPointer -= 2;
 
+        if (obj.IsObject && obj.AsObject() is JSArgumentsObject ao)
+        {
+            ao.SetProperty(propertyName, value);
+            return;
+        }
+
         SetPropertyValue(obj, propertyName, value);
     }
 
@@ -1684,6 +1701,13 @@ public sealed class Interpreter
         var obj = _stack[_stackPointer - 2];
         _stackPointer--;
 
+        if (obj.IsObject && obj.AsObject() is JSArgumentsObject ao && index.IsNumber)
+        {
+            uint idx = (uint)index.ToInt32();
+            _stack[_stackPointer - 1] = ao.GetElement(idx);
+            return;
+        }
+
         var value = GetElementValue(obj, index);
         _stack[_stackPointer - 1] = value;
     }
@@ -1701,6 +1725,13 @@ public sealed class Interpreter
 
         var index = _stack[_stackPointer - 1];
         var obj = _stack[_stackPointer - 2];
+
+        if (obj.IsObject && obj.AsObject() is JSArgumentsObject ao && index.IsNumber)
+        {
+            uint idx = (uint)index.ToInt32();
+            _stack[_stackPointer - 1] = ao.GetElement(idx);
+            return;
+        }
 
         var value = GetElementValue(obj, index);
         _stack[_stackPointer - 1] = value;
@@ -1721,6 +1752,13 @@ public sealed class Interpreter
         var index = _stack[_stackPointer - 2];
         var obj = _stack[_stackPointer - 3];
         _stackPointer -= 3;
+
+        if (obj.IsObject && obj.AsObject() is JSArgumentsObject ao && index.IsNumber)
+        {
+            uint idx = (uint)index.ToInt32();
+            ao.SetElement(idx, value);
+            return;
+        }
 
         SetElementValue(obj, index, value);
     }
@@ -2246,6 +2284,48 @@ public sealed class Interpreter
                             return JSValue.Exception;
                         }
                         Push(function.Constants.Get(constIdx));
+                    }
+                    break;
+
+                case OpCode.SpecialObject:
+                    {
+                        if (pc >= bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        byte kind = bytecode[pc++];
+                        var type = (SpecialObjectType)kind;
+                        switch (type)
+                        {
+                            case SpecialObjectType.Arguments:
+                            case SpecialObjectType.MappedArguments:
+                                if (_currentFrame == null)
+                                {
+                                    Push(JSValue.Undefined);
+                                    break;
+                                }
+                                var calleeObj = _currentFrame.FunctionObject;
+                                if (calleeObj == null)
+                                {
+                                    Push(JSValue.Undefined);
+                                    break;
+                                }
+                                bool mapped = type == SpecialObjectType.MappedArguments;
+                                var argsObj = new JSArgumentsObject(_currentFrame, calleeObj, mapped);
+                                Push(JSValue.FromObject(argsObj));
+                                break;
+                            case SpecialObjectType.ThisFunction:
+                                Push(_currentFrame?.FunctionObject != null ? JSValue.FromObject(_currentFrame.FunctionObject) : JSValue.Undefined);
+                                break;
+                            case SpecialObjectType.NewTarget:
+                            case SpecialObjectType.HomeObject:
+                            case SpecialObjectType.VarObject:
+                            case SpecialObjectType.ImportMeta:
+                            default:
+                                Push(JSValue.Undefined);
+                                break;
+                        }
                     }
                     break;
 

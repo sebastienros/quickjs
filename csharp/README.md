@@ -51,9 +51,9 @@ Use `#if` directives when needed:
 | Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
 | Phase 5: Runtime Objects | ✅ Complete | 4/4 | ~500 |
-| Phase 6: VM & Interpreter | 🔄 In Progress | 5/7 | ~690 |
+| Phase 6: VM & Interpreter | 🔄 In Progress | 5/7 | ~694 |
 
-**Total Tests: 3646** (all passing, 0 skipped)
+**Total Tests: 3650** (all passing, 0 skipped)
 
 **Latest Commit**: `step-6.5-interpreter-calls`
 
@@ -531,7 +531,7 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 - [x] Implement call stack frames
 - [x] Implement call/return opcodes
-- [ ] Handle arguments object
+- [x] Handle arguments object
 - [x] Handle `this` binding
 - [x] Write function call tests
 

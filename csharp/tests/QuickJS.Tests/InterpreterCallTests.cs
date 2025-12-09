@@ -111,4 +111,84 @@ public class InterpreterCallTests
         Assert.True(result.IsObject);
         Assert.Same(obj, result.AsObject());
     }
+
+    [Fact]
+    public void MappedArguments_AliasFunctionArgs()
+    {
+        // function f(a) { const args = arguments; args[0] = 20; return a; }
+        var f = new JSFunctionDef();
+        // One formal parameter
+        f.Args.Add(new JSVarDef());
+
+        f.ByteCode.EmitOp(OpCode.SpecialObject);
+        f.ByteCode.EmitU8((byte)SpecialObjectType.MappedArguments);
+        f.ByteCode.EmitOp(OpCode.Dup);
+        f.ByteCode.EmitOp(OpCode.PushI32);
+        f.ByteCode.EmitI32(0);
+        f.ByteCode.EmitOp(OpCode.PushI32);
+        f.ByteCode.EmitI32(20);
+        f.ByteCode.EmitOp(OpCode.PutArrayEl);
+        f.ByteCode.EmitOp(OpCode.GetArg0);
+        f.ByteCode.EmitOp(OpCode.Return);
+
+        var fn = new JSFunction(f);
+
+        // Caller: push fn const; push arg 10; call1; return
+        var caller = new JSFunctionDef();
+        int fnIdx = caller.Constants.Add(JSValue.FromObject(fn));
+        caller.ByteCode.EmitOp(OpCode.PushConst);
+        caller.ByteCode.EmitU32((uint)fnIdx);
+        caller.ByteCode.EmitOp(OpCode.PushI32);
+        caller.ByteCode.EmitI32(10);
+        caller.ByteCode.EmitOp(OpCode.Call1);
+        caller.ByteCode.EmitOp(OpCode.Return);
+
+        var result = _interpreter.Execute(caller);
+        Assert.False(_context.HasException);
+        Assert.Equal(20, result.ToInt32());
+    }
+
+    [Fact]
+    public void StrictArguments_NoAliasing_CalleeUndefined()
+    {
+        var f = new JSFunctionDef { IsStrict = true };
+        f.Args.Add(new JSVarDef());
+
+        // atoms
+        var calleeAtom = _context.Runtime.AtomTable.GetOrCreateAtom("callee");
+
+        f.ByteCode.EmitOp(OpCode.SpecialObject);
+        f.ByteCode.EmitU8((byte)SpecialObjectType.Arguments);
+        // Read callee: args.callee
+        f.ByteCode.EmitOp(OpCode.GetField);
+        f.ByteCode.EmitU32(calleeAtom.Value);
+        // Drop callee
+        f.ByteCode.EmitOp(OpCode.Drop);
+        // args[0] = 30
+        f.ByteCode.EmitOp(OpCode.SpecialObject);
+        f.ByteCode.EmitU8((byte)SpecialObjectType.Arguments);
+        f.ByteCode.EmitOp(OpCode.PushI32);
+        f.ByteCode.EmitI32(0);
+        f.ByteCode.EmitOp(OpCode.PushI32);
+        f.ByteCode.EmitI32(30);
+        f.ByteCode.EmitOp(OpCode.PutArrayEl);
+        f.ByteCode.EmitOp(OpCode.GetArg0);
+        f.ByteCode.EmitOp(OpCode.Return);
+
+        var fn = new JSFunction(f);
+
+        var caller = new JSFunctionDef();
+        int fnIdx = caller.Constants.Add(JSValue.FromObject(fn));
+        caller.ByteCode.EmitOp(OpCode.PushConst);
+        caller.ByteCode.EmitU32((uint)fnIdx);
+        caller.ByteCode.EmitOp(OpCode.PushI32);
+        caller.ByteCode.EmitI32(10);
+        caller.ByteCode.EmitOp(OpCode.Call1);
+        caller.ByteCode.EmitOp(OpCode.Return);
+
+        var result = _interpreter.Execute(caller);
+        Assert.False(_context.HasException);
+        // No aliasing: a stays 10
+        Assert.Equal(10, result.ToInt32());
+    }
 }

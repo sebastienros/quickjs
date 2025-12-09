@@ -53,6 +53,7 @@ For now, the compiler emits direct arg accesses (`GetArg`/`PutArg`). Creating th
 4. **Tail call**: If `tail_call` flag set and callee is bytecode, reuse the current frame (replace `func`, `locals`, etc.) instead of pushing a new one.
 5. **Return**: `return`/`return_undef` pop the current frame, restore caller `pc`/`stackPointer`, and push the return value (or `undefined`).
 6. **Constructor result**: If a constructor returns a non-object, return the allocated `this` instead (per JS spec).
+7. **`arguments` object**: `OP_special_object` creates mapped (non-strict) or unmapped (strict) arguments objects backed by the call frame's args.
 
 ## Bytecode Examples
 
@@ -91,6 +92,12 @@ call_constructor argc=1
 - Constructor logic: `OP_call_constructor` and `JS_RunFunction`
 - Tail calls: `OP_tail_call` handling in interpreter
 - Bound functions: `JS_CallInternal` path for `JS_TAG_OBJECT` with class `JS_CLASS_BOUND_FUNCTION`
+
+## Arguments Object
+
+- **Mapped** (`SpecialObjectType.MappedArguments`): non-strict mode; `arguments[i]` aliases formal parameters; exposes `callee`.
+- **Unmapped** (`SpecialObjectType.Arguments`): strict mode; no aliasing; `callee` is `undefined`.
+- Implemented via `JSArgumentsObject` with per-index read/write hooks into the current `CallFrame`.
 
 ## C# vs QuickJS Mapping
 
