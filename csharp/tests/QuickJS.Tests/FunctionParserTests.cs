@@ -233,7 +233,7 @@ public class FunctionParserTests
 
     #region Arrow Functions
 
-    [Fact(Skip = "Single param without parens needs lookahead")]
+    [Fact]
     public void ParseArrowFunction_SingleParam_NoParens_Succeeds()
     {
         var atoms = new AtomTable();
@@ -273,7 +273,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Single param without parens needs lookahead")]
+    [Fact]
     public void ParseArrowFunction_Nested_Succeeds()
     {
         var atoms = new AtomTable();

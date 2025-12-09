@@ -1077,4 +1077,175 @@ public sealed class Lexer
     }
 
     #endregion
+
+    #region Position Save/Restore (for lookahead)
+
+    /// <summary>
+    /// Represents a saved lexer position that can be restored later.
+    /// </summary>
+    public readonly struct LexerPosition
+    {
+        /// <summary>The character position in the source.</summary>
+        public readonly int Position;
+        /// <summary>The line number (1-based).</summary>
+        public readonly int Line;
+        /// <summary>The column number (1-based).</summary>
+        public readonly int Column;
+        /// <summary>Whether a line terminator was encountered before this position.</summary>
+        public readonly bool HasLineTerminatorBefore;
+
+        /// <summary>
+        /// Creates a new lexer position.
+        /// </summary>
+        public LexerPosition(int position, int line, int column, bool hasLineTerminatorBefore)
+        {
+            Position = position;
+            Line = line;
+            Column = column;
+            HasLineTerminatorBefore = hasLineTerminatorBefore;
+        }
+    }
+
+    /// <summary>
+    /// Saves the current lexer position for later restoration.
+    /// </summary>
+    public LexerPosition SavePosition()
+    {
+        return new LexerPosition(_position, _line, _column, _hasLineTerminatorBefore);
+    }
+
+    /// <summary>
+    /// Restores the lexer to a previously saved position.
+    /// </summary>
+    public void RestorePosition(LexerPosition pos)
+    {
+        _position = pos.Position;
+        _line = pos.Line;
+        _column = pos.Column;
+        _hasLineTerminatorBefore = pos.HasLineTerminatorBefore;
+    }
+
+    /// <summary>
+    /// Performs a lightweight peek to see the next token type without full tokenization.
+    /// This is used for arrow function detection (looking for =>).
+    /// </summary>
+    /// <param name="noLineTerminator">If true, returns '\n' token type if a line terminator is encountered.</param>
+    /// <returns>The type of the next token.</returns>
+    public TokenType SimplePeekToken(bool noLineTerminator)
+    {
+        int pos = _position;
+
+        // Skip whitespace and comments
+        while (pos < _source.Length)
+        {
+            char c = _source[pos];
+
+            switch (c)
+            {
+                case ' ':
+                case '\t':
+                case '\f':
+                case '\v':
+                    pos++;
+                    continue;
+
+                case '\r':
+                case '\n':
+                    if (noLineTerminator)
+                        return TokenType.LineTerminator;
+                    pos++;
+                    continue;
+
+                case '/':
+                    if (pos + 1 < _source.Length)
+                    {
+                        if (_source[pos + 1] == '/')
+                        {
+                            // Single-line comment
+                            if (noLineTerminator)
+                                return TokenType.LineTerminator;
+                            pos += 2;
+                            while (pos < _source.Length && _source[pos] != '\r' && _source[pos] != '\n')
+                                pos++;
+                            continue;
+                        }
+                        if (_source[pos + 1] == '*')
+                        {
+                            // Multi-line comment
+                            pos += 2;
+                            while (pos + 1 < _source.Length)
+                            {
+                                if (noLineTerminator && (_source[pos] == '\r' || _source[pos] == '\n'))
+                                    return TokenType.LineTerminator;
+                                if (_source[pos] == '*' && _source[pos + 1] == '/')
+                                {
+                                    pos += 2;
+                                    break;
+                                }
+                                pos++;
+                            }
+                            continue;
+                        }
+                    }
+                    // It's just a '/' - could be division or regex
+                    return TokenType.Slash;
+
+                case '=':
+                    if (pos + 1 < _source.Length && _source[pos + 1] == '>')
+                        return TokenType.Arrow;
+                    return TokenType.Assign;
+
+                case '(':
+                    return TokenType.LeftParen;
+                case ')':
+                    return TokenType.RightParen;
+                case '{':
+                    return TokenType.LeftBrace;
+                case '}':
+                    return TokenType.RightBrace;
+                case '[':
+                    return TokenType.LeftBracket;
+                case ']':
+                    return TokenType.RightBracket;
+                case ',':
+                    return TokenType.Comma;
+                case ';':
+                    return TokenType.Semicolon;
+                case ':':
+                    return TokenType.Colon;
+                case '.':
+                    return TokenType.Dot;
+
+                default:
+                    // Check for identifiers
+                    if (IsIdentifierStart(c))
+                    {
+                        // Read the full identifier to check for keywords
+                        int start = pos;
+                        pos++;
+                        while (pos < _source.Length && IsIdentifierPart(_source[pos]))
+                            pos++;
+                        string ident = _source.Substring(start, pos - start);
+
+                        // Check for specific keywords we care about
+                        return ident switch
+                        {
+                            "function" => TokenType.Function,
+                            "in" => TokenType.In,
+                            "of" => TokenType.Of,
+                            "import" => TokenType.Import,
+                            "export" => TokenType.Export,
+                            _ => TokenType.Identifier
+                        };
+                    }
+
+                    // Return the character as-is for other cases
+                    return TokenType.Error;
+            }
+        }
+
+        return TokenType.EOF;
+    }
+
+    #endregion
 }

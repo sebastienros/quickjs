@@ -33,6 +33,9 @@ public enum TokenType
     /// <summary>Lexer error token.</summary>
     Error,
 
+    /// <summary>Line terminator (used by SimplePeekToken for lookahead).</summary>
+    LineTerminator,
+
     // ========================================
     // Literals
     // ========================================

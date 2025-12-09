@@ -121,6 +121,97 @@ public sealed class Parser
         return false;
     }
 
+    /// <summary>
+    /// Peeks at the next token without consuming the current one.
+    /// Used for arrow function detection (e.g., x => ...).
+    /// </summary>
+    /// <param name="noLineTerminator">If true, returns LineTerminator if newline encountered.</param>
+    /// <returns>The type of the next token.</returns>
+    private TokenType PeekToken(bool noLineTerminator)
+    {
+        return _lexer.SimplePeekToken(noLineTerminator);
+    }
+
+    /// <summary>
+    /// Scans forward through balanced parentheses/brackets/braces and returns
+    /// the token type that follows the closing delimiter.
+    /// This is used for arrow function detection: (params) => ...
+    /// </summary>
+    /// <param name="noLineTerminator">If true, returns LineTerminator if newline encountered after closing paren.</param>
+    /// <returns>The token type following the balanced group.</returns>
+    private TokenType SkipParensToken(bool noLineTerminator)
+    {
+        // Save current position
+        var savedPos = _lexer.SavePosition();
+        var savedToken = _currentToken;
+
+        // Track nesting with a stack
+        var stack = new Stack<TokenType>();
+        stack.Push(TokenType.EOF); // Sentinel
+
+        // Process tokens until we find the matching close or EOF
+        while (true)
+        {
+            switch (_currentToken.Type)
+            {
+                case TokenType.LeftParen:
+                case TokenType.LeftBracket:
+                case TokenType.LeftBrace:
+                    stack.Push(_currentToken.Type);
+                    break;
+
+                case TokenType.RightParen:
+                    if (stack.Peek() != TokenType.LeftParen)
+                        goto done;
+                    stack.Pop();
+                    break;
+
+                case TokenType.RightBracket:
+                    if (stack.Peek() != TokenType.LeftBracket)
+                        goto done;
+                    stack.Pop();
+                    break;
+
+                case TokenType.RightBrace:
+                    if (stack.Peek() != TokenType.LeftBrace)
+                        goto done;
+                    stack.Pop();
+                    break;
+
+                case TokenType.EOF:
+                    goto done;
+            }
+
+            NextToken();
+
+            // Check if we've closed all brackets (stack only has sentinel)
+            if (stack.Count == 1)
+            {
+                // We've matched the opening paren - get the next token type
+                TokenType result;
+                if (noLineTerminator && _currentToken.HasLineTerminatorBefore)
+                {
+                    result = TokenType.LineTerminator;
+                }
+                else
+                {
+                    result = _currentToken.Type;
+                }
+
+                // Restore position
+                _lexer.RestorePosition(savedPos);
+                _currentToken = savedToken;
+                return result;
+            }
+        }
+
+    done:
+        // Restore position on error/mismatch
+        _lexer.RestorePosition(savedPos);
+        _currentToken = savedToken;
+        return TokenType.EOF;
+    }
+
     #endregion
 
     #region Bytecode Emission
@@ -849,12 +940,34 @@ public sealed class Parser
                 break;
 
             case TokenType.Identifier:
-                EmitIdentifier();
-                NextToken();
+                // Check for single-param arrow function: x => ...
+                if (PeekToken(true) == TokenType.Arrow)
+                {
+                    // It's an arrow function with single identifier param
+                    var paramName = (string)_currentToken.Value!;
+                    var paramAtom = _atoms.GetOrCreateAtom(paramName);
+                    NextToken(); // consume identifier
+                    ParseArrowFunctionDirect(JSFunctionKind.Normal, new List<JSAtom> { paramAtom });
+                }
+                else
+                {
+                    EmitIdentifier();
+                    NextToken();
+                }
                 break;
 
             case TokenType.LeftParen:
-                ParseParenthesizedExpressionOrArrow();
+                // Check if this is an arrow function: (...) => ...
+                if (SkipParensToken(true) == TokenType.Arrow)
+                {
+                    // It's an arrow function - parse it
+                    ParseArrowFunction(JSFunctionKind.Normal);
+                }
+                else
+                {
+                    // It's a parenthesized expression
+                    ParseParenthesizedExpression();
+                }
                 break;
 
             case TokenType.LeftBracket:
@@ -894,103 +1007,34 @@ public sealed class Parser
     }
 
     /// <summary>
-    /// Parses a parenthesized expression or arrow function.
-    /// This requires lookahead to distinguish: (expr) vs (params) => body
+    /// Parses a simple parenthesized expression: (expr)
+    /// Called when we've already determined this is NOT an arrow function.
     /// </summary>
-    private void ParseParenthesizedExpressionOrArrow()
+    private void ParseParenthesizedExpression()
+    {
+        NextToken(); // consume '('
+        ParseExpression();
+        Expect(TokenType.RightParen);
+    }
+
+    /// <summary>
+    /// Parses an arrow function starting at '('.
+    /// Called when we've already determined this IS an arrow function via lookahead.
+    /// </summary>
+    private void ParseArrowFunction(JSFunctionKind kind)
     {
         NextToken(); // consume '('
 
-        // Check for empty parens: () => ...
+        // Check for empty params: () => ...
         if (Check(TokenType.RightParen))
         {
             NextToken(); // consume ')'
-            if (!Check(TokenType.Arrow))
-            {
-                throw new JSSyntaxError(
-                    "Unexpected token ')'",
-                    _currentToken.Start);
-            }
-            // Empty arrow function - parse it directly with no params
-            ParseArrowFunctionDirect(JSFunctionKind.Normal, new List<JSAtom>());
+            ParseArrowFunctionDirect(kind, new List<JSAtom>());
             return;
         }
 
-        // Check for rest parameter: (...) => ...
-        if (Check(TokenType.Ellipsis))
-        {
-            // This must be an arrow function with rest param
-            ParseArrowFunctionWithParams(JSFunctionKind.Normal);
-            return;
-        }
-
-        // Try to parse as expression first, but track identifiers for potential arrow params
-        // We parse expressions but keep track of whether each position was a simple identifier
-        int startPos = _currentFunction.ByteCode.Size;
-        var potentialParams = new List<JSAtom>();
-        bool couldBeArrowParams = true;
-
-        // Parse first expression, tracking if it's a simple identifier
-        if (Check(TokenType.Identifier))
-        {
-            var name = (string)_currentToken.Value!;
-            potentialParams.Add(_atoms.GetOrCreateAtom(name));
-        }
-        else
-        {
-            couldBeArrowParams = false;
-        }
-        ParseAssignExpression();
-
-        // Check what follows
-        while (Check(TokenType.Comma))
-        {
-            NextToken(); // consume ','
-
-            // Check for rest after comma: (a, ...rest) => ...
-            if (Check(TokenType.Ellipsis))
-            {
-                // Must be arrow function with rest param
-                // Truncate what we've parsed and use ParseArrowFunctionWithParams
-                _currentFunction.ByteCode.Truncate(startPos);
-                // Can't easily reparse from here - for now, error
-                throw new JSSyntaxError(
-                    "Rest parameters in arrow functions not yet supported in this context",
-                    _currentToken.Start);
-            }
-
-            // Track if this is an identifier
-            if (couldBeArrowParams && Check(TokenType.Identifier))
-            {
-                var name = (string)_currentToken.Value!;
-                potentialParams.Add(_atoms.GetOrCreateAtom(name));
-            }
-            else
-            {
-                couldBeArrowParams = false;
-            }
-
-            EmitOp(OpCode.Drop); // Drop previous if it's comma expression
-            ParseAssignExpression();
-        }
-
-        Expect(TokenType.RightParen);
-
-        if (Check(TokenType.Arrow))
-        {
-            if (!couldBeArrowParams)
-            {
-                throw new JSSyntaxError(
-                    "Invalid arrow function parameter list",
-                    _currentToken.Start);
-            }
-            // It's an arrow function! Truncate emitted code and build arrow function
-            _currentFunction.ByteCode.Truncate(startPos);
-            ParseArrowFunctionDirect(JSFunctionKind.Normal, potentialParams);
-            return;
-        }
-
-        // It was just a parenthesized expression - bytecode is already emitted
+        // Parse parameters directly (we know this is an arrow function)
+        ParseArrowFunctionWithParams(kind);
     }
 
     /// <summary>
@@ -1194,7 +1238,6 @@ public sealed class Parser
         {
             // There's a line terminator after 'async', so it should be an identifier
             // But we've already consumed 'async' - emit it as an identifier
-            // We emit the atom for "async" directly
             var asyncAtom = _atoms.GetOrCreateAtom("async");
             EmitOp(OpCode.ScopeGetVar);
             EmitAtom(asyncAtom);
@@ -1210,65 +1253,25 @@ public sealed class Parser
         else if (Check(TokenType.LeftParen))
         {
             // async arrow function: async () => ... or async (params) => ...
-            NextToken(); // consume '('
-            ParseArrowFunctionWithParams(JSFunctionKind.Async);
+            ParseArrowFunction(JSFunctionKind.Async);
         }
         else if (Check(TokenType.Identifier))
         {
             // async arrow function with single param: async x => ...
-            var paramName = (string)_currentToken.Value!;
-            var paramAtom = _atoms.GetOrCreateAtom(paramName);
-            NextToken();
-
-            if (!Check(TokenType.Arrow))
+            // Check for => after the identifier
+            if (PeekToken(true) == TokenType.Arrow)
+            {
+                var paramName = (string)_currentToken.Value!;
+                var paramAtom = _atoms.GetOrCreateAtom(paramName);
+                NextToken(); // consume identifier
+                ParseArrowFunctionDirect(JSFunctionKind.Async, new List<JSAtom> { paramAtom });
+            }
+            else
             {
                 throw new JSSyntaxError(
                     "Expected '=>' after async parameter",
                     _currentToken.Start);
             }
-
-            // Build the async arrow function
-            var parentFunction = _currentFunction;
-            var newFunction = new JSFunctionDef(JSAtom.Empty);
-            newFunction.Filename = parentFunction.Filename;
-            newFunction.Parent = parentFunction;
-            newFunction.FuncKind = JSFunctionKind.Async;
-            newFunction.FuncType = JSParseFunctionType.Arrow;
-
-            ConfigureFunctionByType(newFunction, JSParseFunctionType.Arrow, JSFunctionKind.Async);
-            _currentFunction = newFunction;
-
-            _currentFunction.AddArg(paramAtom);
-            _currentFunction.DefinedArgCount = 1;
-            _currentFunction.HasSimpleParameterList = true;
-
-            Expect(TokenType.Arrow);
-
-            _currentFunction.PushScope();
-
-            if (Check(TokenType.LeftBrace))
-            {
-                ParseFunctionBody();
-            }
-            else
-            {
-                ParseAssignExpression();
-                EmitOp(OpCode.ReturnAsync);
-            }
-
-            _currentFunction.PopScope();
-
-            if (!EndsWithReturn())
-            {
-                EmitOp(OpCode.Undefined);
-                EmitOp(OpCode.Return);
-            }
-
-            int funcIdx = parentFunction.AddChildFunction(newFunction);
-            _currentFunction = parentFunction;
-
-            EmitOp(OpCode.FClosure);
-            EmitU16((ushort)funcIdx);
         }
         else
         {
@@ -2926,15 +2929,6 @@ public sealed class Parser
         var bytes = buffer.ToArray();
         var lastOp = (OpCode)bytes[lastPos];
         return lastOp == OpCode.Return || lastOp == OpCode.ReturnAsync;
-    }
-
-    /// <summary>
-    /// Parses an arrow function: (params) => expr or (params) => { body }
-    /// Called after the parameters have been parsed as an expression.
-    /// </summary>
-    public void ParseArrowFunction(JSFunctionKind kind = JSFunctionKind.Normal)
-    {
-        ParseFunction(JSParseFunctionType.Arrow, kind, JSAtom.Empty);
     }
 
     #endregion
