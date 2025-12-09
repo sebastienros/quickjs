@@ -443,7 +443,7 @@ public class JSFunctionDefTests
         int scopeIdx = fd.PushScope();
 
         Assert.Equal(0, scopeIdx);
-        Assert.Equal(1, fd.Scopes.Count);
+        Assert.Single(fd.Scopes);
         Assert.Equal(0, fd.ScopeLevel);
     }
 
@@ -604,7 +604,7 @@ public class JSFunctionDefTests
 
         // Verify
         Assert.Equal(2, fd.Args.Count);
-        Assert.Equal(1, fd.Vars.Count);
+        Assert.Single(fd.Vars);
         Assert.True(fd.ByteCode.Size > 0);
     }
 
@@ -634,7 +634,7 @@ public class JSFunctionDefTests
 
         // Verify
         Assert.True(outer.Vars[0].IsCaptured);
-        Assert.Equal(1, inner.ClosureVars.Count);
+        Assert.Single(inner.ClosureVars);
         Assert.Equal(JSClosureType.Local, inner.ClosureVars[0].ClosureType);
     }
 

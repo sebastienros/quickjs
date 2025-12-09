@@ -1023,8 +1023,8 @@ public class JSArrayTests
     {
         var array = new JSArray(new[] { JSValue.FromInt32(1), JSValue.FromInt32(2), JSValue.FromInt32(3) });
 
-        Assert.True(array.Contains(JSValue.FromInt32(2)));
-        Assert.False(array.Contains(JSValue.FromInt32(99)));
+        Assert.Contains(JSValue.FromInt32(2), array);
+        Assert.DoesNotContain(JSValue.FromInt32(99), array);
     }
 
     [Fact]

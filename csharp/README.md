@@ -55,7 +55,7 @@ Use `#if` directives when needed:
 
 **Total Tests: 3634** (all passing, 0 skipped)
 
-**Latest Commit**: `step-6.4-interpreter-control`
+**Latest Commit**: `step-6.5-interpreter-calls`
 
 # Detailed Implementation Plan
 
@@ -838,9 +838,9 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ### Current Status
 
-**Current Step**: Step 6.3 Complete  
-**Last Commit**: `step-6.4-interpreter-control`  
-**Next Step**: `step-6.5-interpreter-calls`
+**Current Step**: Step 6.4 Complete  
+**Last Commit**: `step-6.5-interpreter-calls`  
+**Next Step**: `step-6.6-interpreter-closures`
 
 ### Step Completion Log
 
