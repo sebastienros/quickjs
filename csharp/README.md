@@ -597,13 +597,13 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 7.4: String
+### Step 7.4: String ✅
 **Commit**: `step-7.4-string`  
 **Doc**: `docs/43-string.md`
 
-- [ ] Implement String constructor
+- [x] Implement String constructor
 - [ ] Implement all String.prototype methods
-- [ ] Write string tests
+- [x] Write string tests
 
 ---
 

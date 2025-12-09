@@ -612,6 +612,7 @@ public sealed class JSContext : IDisposable
         InitializeFunctionConstructor();
         InitializeErrorConstructors();
         InitializeNumberAndMath();
+        InitializeStringConstructor();
     }
 
     private void InitializeObjectConstructor()
@@ -835,6 +836,54 @@ public sealed class JSContext : IDisposable
         });
 
         _globalObject.Set("Math", JSValue.FromObject(mathObj));
+    }
+
+    private void InitializeStringConstructor()
+    {
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+
+        var stringProto = new JSObject(objectProto, JSClassId.String);
+        SetClassPrototype(JSClassId.String, stringProto);
+
+        JSValue StringCtor(JSValue thisVal, JSValue[] args)
+        {
+            string str = args.Length > 0 ? JSValueConversion.ToString(args[0]) : string.Empty;
+            var strVal = JSValue.FromString(str);
+
+            // If called with new, wrap in String object
+            if (thisVal.IsObject && thisVal.AsObject().ClassId == JSClassId.Object)
+            {
+                var wrapper = new JSObject(stringProto, JSClassId.String) { InternalValue = strVal };
+                return JSValue.FromObject(wrapper);
+            }
+            if (thisVal.IsObject && thisVal.AsObject().ClassId == JSClassId.String)
+            {
+                thisVal.AsObject().InternalValue = strVal;
+                return thisVal;
+            }
+
+            return strVal;
+        }
+
+        var stringCtor = new JSFunction(StringCtor, "String", 1, functionProto);
+        stringCtor.Set("prototype", JSValue.FromObject(stringProto));
+        stringProto.Set("constructor", JSValue.FromObject(stringCtor));
+
+        // String.prototype.toString / valueOf
+        JSValue StringProtoToString(JSValue thisVal, JSValue[] args)
+        {
+            if (thisVal.IsString)
+                return thisVal;
+            if (thisVal.IsObject && thisVal.AsObject().ClassId == JSClassId.String)
+                return thisVal.AsObject().InternalValue;
+            return ThrowTypeError("String.prototype.toString called on non-string");
+        }
+
+        stringProto.Set("toString", JSValue.FromObject(new JSFunction(StringProtoToString, "toString", 0, functionProto)));
+        stringProto.Set("valueOf", JSValue.FromObject(new JSFunction(StringProtoToString, "valueOf", 0, functionProto)));
+
+        _globalObject.Set("String", JSValue.FromObject(stringCtor));
     }
 
     #endregion

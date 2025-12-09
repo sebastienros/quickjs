@@ -146,6 +146,16 @@ public class JSObject
             throw new ArgumentNullException(nameof(propertyName));
         }
 
+        // String wrapper special cases
+        if (_classId == JSClassId.String)
+        {
+            if (propertyName == "length")
+            {
+                var s = _internalValue.ToString() ?? string.Empty;
+                return JSValue.FromInt32(s.Length);
+            }
+        }
+
         // Look up in own properties first
         if (_properties.TryGetValue(propertyName, out var descriptor))
         {
@@ -173,6 +183,17 @@ public class JSObject
     /// <returns>The property value, or <see cref="JSValue.Undefined"/> if not found.</returns>
     public JSValue Get(uint index)
     {
+        // String wrapper indexed access
+        if (_classId == JSClassId.String)
+        {
+            var s = _internalValue.ToString() ?? string.Empty;
+            if (index < (uint)s.Length)
+            {
+                return JSValue.FromString(s[(int)index].ToString());
+            }
+            return JSValue.Undefined;
+        }
+
         // Look up in own indexed properties first
         if (_indexedProperties != null && _indexedProperties.TryGetValue(index, out var descriptor))
         {
