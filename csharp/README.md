@@ -567,13 +567,13 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ## Phase 7: Built-in Objects
 
-### Step 7.1: Object and Function Constructors
+### Step 7.1: Object and Function Constructors ✅
 **Commit**: `step-7.1-object-function`  
 **Doc**: `docs/40-builtin-object-function.md`
 
-- [ ] Implement `Object` constructor and methods
-- [ ] Implement `Function` constructor and methods
-- [ ] Write built-in tests
+- [x] Implement `Object` constructor and methods
+- [x] Implement `Function` constructor (stubbed) and methods
+- [x] Write built-in tests
 
 ---
 

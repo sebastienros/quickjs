@@ -128,6 +128,9 @@ public sealed class JSContext : IDisposable
 
         // Initialize basic objects
         InitializeBasicObjects();
+
+        // Install built-ins (Object, Function, etc.)
+        InitializeBuiltins();
     }
 
     #endregion
@@ -589,6 +592,119 @@ public sealed class JSContext : IDisposable
 
         // Set up global object prototype chain
         _globalObject.SetPrototype(objectPrototype);
+    }
+
+    /// <summary>
+    /// Installs built-in constructors and global objects.
+    /// </summary>
+    private void InitializeBuiltins()
+    {
+        InitializeObjectConstructor();
+        InitializeFunctionConstructor();
+    }
+
+    private void InitializeObjectConstructor()
+    {
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+
+        JSValue ObjectCtor(JSValue thisVal, JSValue[] args)
+        {
+            var arg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (arg.IsObject)
+                return arg; // return the object as-is
+
+            if (arg.IsNull || arg.IsUndefined)
+                return JSValue.FromObject(new JSObject(objectProto, JSClassId.Object));
+
+            // Box primitive wrappers
+            if (arg.IsString)
+            {
+                var obj = new JSObject(objectProto, JSClassId.String) { InternalValue = arg };
+                return JSValue.FromObject(obj);
+            }
+            if (arg.IsNumber)
+            {
+                var obj = new JSObject(objectProto, JSClassId.Number) { InternalValue = arg };
+                return JSValue.FromObject(obj);
+            }
+            if (arg.IsBool)
+            {
+                var obj = new JSObject(objectProto, JSClassId.Boolean) { InternalValue = arg };
+                return JSValue.FromObject(obj);
+            }
+
+            return JSValue.FromObject(new JSObject(objectProto, JSClassId.Object));
+        }
+
+        var functionProto = GetClassPrototype(JSClassId.CFunction);
+        var objectCtorFunc = new JSFunction(ObjectCtor, "Object", 1, functionProto);
+
+        // Object.create(proto)
+        JSValue ObjectCreate(JSValue thisVal, JSValue[] args)
+        {
+            var protoVal = args.Length > 0 ? args[0] : JSValue.Undefined;
+            if (protoVal.IsNull)
+                return JSValue.FromObject(new JSObject(null, JSClassId.Object));
+            if (!protoVal.IsObject)
+                return ThrowTypeError("Object prototype may only be an Object or null");
+            var protoObj = protoVal.AsObject();
+            return JSValue.FromObject(new JSObject(protoObj, JSClassId.Object));
+        }
+
+        // Object.prototype.hasOwnProperty
+        JSValue HasOwnProperty(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject)
+                return JSValue.False;
+            var key = args.Length > 0 ? args[0].ToString() : "";
+            var obj = thisVal.AsObject();
+            return JSValue.FromBoolean(obj.HasOwnProperty(key));
+        }
+
+        // Object.prototype.toString
+        JSValue ObjectProtoToString(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject)
+                return JSValue.FromString("[object " + thisVal.Tag + "]");
+            var obj = thisVal.AsObject();
+            var className = obj.ClassId.ToString();
+            return JSValue.FromString($"[object {className}]");
+        }
+
+        // Constructor.prototype
+        objectCtorFunc.Set("prototype", JSValue.FromObject(objectProto));
+
+        // Attach global Object
+        _globalObject.Set("Object", JSValue.FromObject(objectCtorFunc));
+
+        // Attach Object static methods
+        objectCtorFunc.Set("create", JSValue.FromObject(new JSFunction(ObjectCreate, "create", 1, functionProto)));
+
+        // Attach prototype methods
+        objectProto.Set("constructor", JSValue.FromObject(objectCtorFunc));
+        objectProto.Set("hasOwnProperty", JSValue.FromObject(new JSFunction(HasOwnProperty, "hasOwnProperty", 1, functionProto)));
+        objectProto.Set("toString", JSValue.FromObject(new JSFunction(ObjectProtoToString, "toString", 0, functionProto)));
+    }
+
+    private void InitializeFunctionConstructor()
+    {
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+
+        JSValue FunctionCtor(JSValue thisVal, JSValue[] args)
+        {
+            // Not yet supported to compile from strings
+            return ThrowTypeError("Function constructor from string is not supported");
+        }
+
+        var functionCtorFunc = new JSFunction(FunctionCtor, "Function", 1, functionProto);
+        functionCtorFunc.Set("prototype", JSValue.FromObject(functionProto));
+
+        // Function.prototype.constructor = Function
+        functionProto.Set("constructor", JSValue.FromObject(functionCtorFunc));
+
+        // Attach global Function
+        _globalObject.Set("Function", JSValue.FromObject(functionCtorFunc));
     }
 
     #endregion
