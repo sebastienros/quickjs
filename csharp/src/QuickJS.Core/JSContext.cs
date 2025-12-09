@@ -613,6 +613,7 @@ public sealed class JSContext : IDisposable
         InitializeErrorConstructors();
         InitializeNumberAndMath();
         InitializeStringConstructor();
+        InitializeArrayConstructor();
     }
 
     private void InitializeObjectConstructor()
@@ -884,6 +885,72 @@ public sealed class JSContext : IDisposable
         stringProto.Set("valueOf", JSValue.FromObject(new JSFunction(StringProtoToString, "valueOf", 0, functionProto)));
 
         _globalObject.Set("String", JSValue.FromObject(stringCtor));
+    }
+
+    private void InitializeArrayConstructor()
+    {
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+
+        var arrayProto = GetClassPrototype(JSClassId.Array);
+        if (arrayProto == null)
+        {
+            arrayProto = new JSObject(objectProto, JSClassId.Array);
+            SetClassPrototype(JSClassId.Array, arrayProto);
+        }
+
+        JSValue ArrayCtor(JSValue thisVal, JSValue[] args)
+        {
+            JSObject arr = new JSObject(arrayProto, JSClassId.Array);
+
+            if (args.Length == 1 && args[0].IsNumber)
+            {
+                var len = JSValueConversion.ToNumber(args[0]);
+                if (len < 0 || len > uint.MaxValue)
+                    return ThrowRangeError("Invalid array length");
+                arr.SetArrayLength((uint)len);
+            }
+            else
+            {
+                for (int i = 0; i < args.Length; i++)
+                {
+                    arr.Set((uint)i, args[i]);
+                }
+            }
+
+            return JSValue.FromObject(arr);
+        }
+
+        var arrayCtorFn = new JSFunction(ArrayCtor, "Array", 1, functionProto);
+        arrayCtorFn.Set("prototype", JSValue.FromObject(arrayProto));
+        arrayProto.Set("constructor", JSValue.FromObject(arrayCtorFn));
+
+        // Array.prototype.push
+        JSValue ArrayPush(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.push called on non-array");
+            var arr = thisVal.AsObject();
+            foreach (var arg in args)
+            {
+                arr.Set(arr.ArrayLength, arg);
+            }
+            return JSValue.FromInt32((int)arr.ArrayLength);
+        }
+
+        // Array.prototype.pop
+        JSValue ArrayPop(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.Array)
+                return ThrowTypeError("Array.prototype.pop called on non-array");
+            var arr = thisVal.AsObject();
+            return arr.ArrayPop();
+        }
+
+        arrayProto.Set("push", JSValue.FromObject(new JSFunction(ArrayPush, "push", 1, functionProto)));
+        arrayProto.Set("pop", JSValue.FromObject(new JSFunction(ArrayPop, "pop", 0, functionProto)));
+
+        _globalObject.Set("Array", JSValue.FromObject(arrayCtorFn));
     }
 
     #endregion

@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 
 namespace QuickJS;
 
@@ -58,6 +59,9 @@ public class JSObject
     // Optional internal data for primitive wrappers and special objects
     private JSValue _internalValue;
 
+    // Array length tracking
+    private uint _arrayLength;
+
     #endregion
 
     #region Constructors
@@ -75,6 +79,7 @@ public class JSObject
         _hasImmutablePrototype = false;
         _properties = new Dictionary<string, PropertyDescriptor>();
         _internalValue = JSValue.Undefined;
+        _arrayLength = 0;
     }
 
     #endregion
@@ -111,6 +116,11 @@ public class JSObject
     /// (can have new properties added).
     /// </summary>
     public bool IsExtensible => _extensible;
+
+    /// <summary>
+    /// Gets the array length (for Array objects).
+    /// </summary>
+    public uint ArrayLength => _arrayLength;
 
     /// <summary>
     /// Gets the number of own properties (not including prototype properties).
@@ -154,6 +164,10 @@ public class JSObject
                 var s = _internalValue.ToString() ?? string.Empty;
                 return JSValue.FromInt32(s.Length);
             }
+        }
+        else if (_classId == JSClassId.Array && propertyName == "length")
+        {
+            return JSValue.FromInt32((int)_arrayLength);
         }
 
         // Look up in own properties first
@@ -318,7 +332,50 @@ public class JSObject
 
         _indexedProperties ??= new Dictionary<uint, PropertyDescriptor>();
         _indexedProperties[index] = PropertyDescriptor.Data(value);
+
+        if (_classId == JSClassId.Array)
+        {
+            var newLen = index + 1;
+            if (newLen > _arrayLength)
+                _arrayLength = newLen;
+        }
         return true;
+    }
+
+    /// <summary>
+    /// Removes the last element for array objects and returns its value, or undefined if empty.
+    /// </summary>
+    public JSValue ArrayPop()
+    {
+        if (_classId != JSClassId.Array || _arrayLength == 0)
+            return JSValue.Undefined;
+
+        uint lastIndex = _arrayLength - 1;
+        JSValue result = JSValue.Undefined;
+        if (_indexedProperties != null && _indexedProperties.TryGetValue(lastIndex, out var desc))
+        {
+            result = GetValueFromDescriptor(desc);
+            _indexedProperties.Remove(lastIndex);
+        }
+        _arrayLength = lastIndex;
+        return result;
+    }
+
+    /// <summary>
+    /// Sets the array length (truncating elements when shrinking).
+    /// </summary>
+    public void SetArrayLength(uint newLength)
+    {
+        if (_classId != JSClassId.Array)
+            return;
+
+        if (newLength < _arrayLength && _indexedProperties != null)
+        {
+            var keysToRemove = _indexedProperties.Keys.Where(k => k >= newLength).ToList();
+            foreach (var k in keysToRemove)
+                _indexedProperties.Remove(k);
+        }
+        _arrayLength = newLength;
     }
 
     /// <summary>

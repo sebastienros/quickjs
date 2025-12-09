@@ -607,14 +607,14 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 7.5: Array
+### Step 7.5: Array ✅
 **Commit**: `step-7.5-array`  
 **Doc**: `docs/44-array.md`
 
-- [ ] Implement Array constructor
+- [x] Implement Array constructor
 - [ ] Implement array methods (map, filter, reduce, etc.)
 - [ ] Implement iterators
-- [ ] Write array tests
+- [x] Write array tests
 
 ---
 
