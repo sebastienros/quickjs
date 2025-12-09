@@ -900,6 +900,7 @@ As each step is completed, documentation files will be added to the `docs/` fold
 | `26-interpreter-loop.md` | Interpreter Loop Basics | 6.2 |
 | `27-variables-properties.md` | Variables and Properties | 6.3 |
 | `28-interpreter-control-flow.md` | Control Flow | 6.4 |
+| `29-function-calls.md` | Function Calls | 6.5 |
 | *...more as implementation progresses* | | |
 
 ---
