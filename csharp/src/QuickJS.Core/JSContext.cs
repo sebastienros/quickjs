@@ -647,6 +647,7 @@ public sealed class JSContext : IDisposable
         InitializeSymbol();
         InitializeReflect();
         InitializeProxy();
+        InitializeConsole();
     }
 
     private void InitializeObjectConstructor()
@@ -4663,6 +4664,36 @@ public sealed class JSContext : IDisposable
         proxyCtor.Set("revocable", JSValue.FromObject(new JSFunction(ProxyRevocable, "revocable", 2, functionProto)));
 
         _globalObject.Set("Proxy", JSValue.FromObject(proxyCtor));
+    }
+
+    #endregion
+
+    #region Console Initialization
+
+    private JSConsole? _console;
+
+    /// <summary>
+    /// Gets the console instance for this context.
+    /// </summary>
+    public JSConsole Console => _console ?? throw new InvalidOperationException("Console not initialized");
+
+    /// <summary>
+    /// Event raised when console output is written.
+    /// </summary>
+    public event EventHandler<ConsoleOutputEventArgs>? ConsoleOutput;
+
+    private void InitializeConsole()
+    {
+        var objectProto = GetClassPrototype(JSClassId.Object);
+
+        // Create console object - it sets up all its methods internally
+        _console = new JSConsole(objectProto);
+
+        // Subscribe to console output events
+        _console.Output += (sender, e) => ConsoleOutput?.Invoke(this, e);
+
+        // Set console on global object
+        _globalObject.Set("console", JSValue.FromObject(_console));
     }
 
     #endregion

@@ -53,10 +53,11 @@ Use `#if` directives when needed:
 | Phase 5: Runtime Objects | ✅ Complete | 4/4 | ~500 |
 | Phase 6: VM & Interpreter | ✅ Complete | 7/7 | ~704 |
 | Phase 7: Built-in Objects | ✅ Complete | 13/13 | ~1077 |
+| Phase 8: Standard Library | 🔄 In Progress | 1/3 | ~38 |
 
-**Total Tests: 2134** (all passing, 0 skipped)
+**Total Tests: 2172** (all passing, 0 skipped)
 
-**Latest Commit**: `step-7.13-proxy`
+**Latest Commit**: `step-8.1-console`
 
 # Detailed Implementation Plan
 
@@ -708,13 +709,18 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ## Phase 8: Standard Library
 
-### Step 8.1: Console
+### Step 8.1: Console ✅
 **Commit**: `step-8.1-console`  
 **Doc**: `docs/53-console.md`
 
-- [ ] Implement console.log, warn, error, etc.
-- [ ] Implement console.time/timeEnd
-- [ ] Write console tests
+- [x] Implement console.log, warn, error, etc.
+- [x] Implement console.time/timeEnd
+- [x] Implement console.count/countReset
+- [x] Implement console.group/groupEnd
+- [x] Implement console.assert
+- [x] Implement console.dir/dirxml/table
+- [x] Implement Output event for C# integration
+- [x] Write console tests
 
 ---
 
