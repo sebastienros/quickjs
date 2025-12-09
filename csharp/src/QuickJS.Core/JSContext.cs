@@ -1280,7 +1280,7 @@ public sealed class JSContext : IDisposable
             var onFulfilled = args.Length > 0 && args[0].IsObject ? args[0].AsObject() as JSFunction : null;
             var onRejected = args.Length > 1 && args[1].IsObject ? args[1].AsObject() as JSFunction : null;
 
-            var nextPromiseVal = PromiseCtor(JSValue.Undefined, new[] { new JSFunction((thisArg, a) => JSValue.Undefined, prototype: functionProto) });
+            var nextPromiseVal = PromiseCtor(JSValue.Undefined, new[] { JSValue.FromObject(new JSFunction((thisArg, a) => JSValue.Undefined, prototype: functionProto)) });
             var next = nextPromiseVal.AsObject();
             next.Set(StateKey, JSValue.FromString(Pending));
             next.Set(ResultKey, JSValue.Undefined);
@@ -1345,7 +1345,7 @@ public sealed class JSContext : IDisposable
             if (args.Length > 0 && args[0].IsObject && args[0].AsObject().Prototype == promiseProto)
                 return args[0];
             var val = args.Length > 0 ? args[0] : JSValue.Undefined;
-            var p = PromiseCtor(JSValue.Undefined, new[] { new JSFunction((_, a) => JSValue.Undefined, prototype: functionProto) }).AsObject();
+            var p = PromiseCtor(JSValue.Undefined, new[] { JSValue.FromObject(new JSFunction((_, a) => JSValue.Undefined, prototype: functionProto)) }).AsObject();
             p.Set(StateKey, JSValue.FromString(Fulfilled));
             p.Set(ResultKey, val);
             return JSValue.FromObject(p);
@@ -1354,7 +1354,7 @@ public sealed class JSContext : IDisposable
         JSValue PromiseReject(JSValue thisVal, JSValue[] args)
         {
             var val = args.Length > 0 ? args[0] : JSValue.Undefined;
-            var p = PromiseCtor(JSValue.Undefined, new[] { new JSFunction((_, a) => JSValue.Undefined, prototype: functionProto) }).AsObject();
+            var p = PromiseCtor(JSValue.Undefined, new[] { JSValue.FromObject(new JSFunction((_, a) => JSValue.Undefined, prototype: functionProto)) }).AsObject();
             p.Set(StateKey, JSValue.FromString(Rejected));
             p.Set(ResultKey, val);
             return JSValue.FromObject(p);

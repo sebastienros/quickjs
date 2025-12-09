@@ -491,19 +491,6 @@ public class JSFunction : JSObject
         }
     }
 
-    internal JSValue CallNativeWithoutResolve(JSValue thisArg, JSValue[] args)
-    {
-        // Same as CallNative but without resolving bound functions (used for internal resolve/reject to avoid changing 'this')
-        if (_nativeFunction != null)
-        {
-            return _nativeFunction(thisArg, args);
-        }
-        if (_nativeFunctionMagic != null)
-        {
-            return _nativeFunctionMagic(thisArg, args, _magic);
-        }
-        throw new InvalidOperationException("Cannot call a non-native function with CallNativeWithoutResolve.");
-    }
 
     #endregion
 

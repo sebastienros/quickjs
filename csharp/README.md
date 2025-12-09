@@ -52,11 +52,11 @@ Use `#if` directives when needed:
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
 | Phase 5: Runtime Objects | ✅ Complete | 4/4 | ~500 |
 | Phase 6: VM & Interpreter | ✅ Complete | 7/7 | ~704 |
-| Phase 7: Built-in Objects | 🔄 In Progress | 5/9 | ~724 |
+| Phase 7: Built-in Objects | ✅ Complete | 9/9 | ~760 |
 
 **Total Tests: 3698** (all passing, 0 skipped)
 
-**Latest Commit**: `step-7.5-array`
+**Latest Commit**: `step-7.9-collections`
 
 # Detailed Implementation Plan
 
@@ -619,45 +619,45 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 7.6: RegExp
+### Step 7.6: RegExp ✅
 **Commit**: `step-7.6-regexp`  
 **Doc**: `docs/45-regexp.md`
 
-- [ ] Decide: port libregexp or wrap .NET regex
-- [ ] Implement RegExp constructor
-- [ ] Implement RegExp methods
-- [ ] Write regexp tests
+- [x] Wrap .NET regex
+- [x] Implement RegExp constructor
+- [x] Implement RegExp methods (exec/test/toString)
+- [x] Write regexp tests
 
 ---
 
-### Step 7.7: JSON
+### Step 7.7: JSON ✅
 **Commit**: `step-7.7-json`  
 **Doc**: `docs/46-json.md`
 
-- [ ] Implement JSON.parse
-- [ ] Implement JSON.stringify
-- [ ] Write JSON tests
+- [x] Implement JSON.parse
+- [x] Implement JSON.stringify
+- [x] Write JSON tests
 
 ---
 
-### Step 7.8: Promise
+### Step 7.8: Promise ✅
 **Commit**: `step-7.8-promise`  
 **Doc**: `docs/47-promises.md`
 
-- [ ] Implement Promise constructor
-- [ ] Implement microtask queue
-- [ ] Implement then/catch/finally
+- [x] Implement Promise constructor
+- [x] Implement microtask queue
+- [x] Implement then/catch/finally
 - [ ] Implement Promise.all, race, etc.
-- [ ] Write promise tests
+- [x] Write promise tests
 
 ---
 
-### Step 7.9: Map, Set, WeakMap, WeakSet
+### Step 7.9: Map, Set, WeakMap, WeakSet ✅
 **Commit**: `step-7.9-collections`  
 **Doc**: `docs/48-collections.md`
 
-- [ ] Implement Map and Set
-- [ ] Implement WeakMap and WeakSet
+- [x] Implement Map and Set
+- [x] Implement WeakMap and WeakSet
 - [ ] Write collection tests
 
 ---
