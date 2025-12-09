@@ -92,6 +92,17 @@ call_constructor argc=1
 - Tail calls: `OP_tail_call` handling in interpreter
 - Bound functions: `JS_CallInternal` path for `JS_TAG_OBJECT` with class `JS_CLASS_BOUND_FUNCTION`
 
+## C# vs QuickJS Mapping
+
+| Concept | QuickJS (C) | C# Implementation |
+|---------|-------------|-------------------|
+| Call opcode | `CASE(OP_call)` | `Interpreter.Execute` `OpCode.Call`/`CallN` branch |
+| Method call | `OP_call_method` uses `call_argv[-2]` as this | `CallMethod` pops `this` before callee, passes to `CallFunction` |
+| Constructor | `OP_call_constructor` | `CallConstructor` allocates `this` (prototype if available), returns object or `this` |
+| Tail call | `OP_tail_call(*)` | Treated as normal call (no reuse yet) |
+| `this` binding | Passed to `JS_CallInternal` | Stored in `CallFrame.ThisValue`, exposed via `OpCode.PushThis` |
+| Constant pool functions | `OP_fclosure/OP_push_const` | `PushConst` loads `JSFunction` instances from `JSFunctionDef.Constants` |
+
 ## Tests to Add (when implementing)
 
 - Call bytecode functions with varying arity (including fewer/more args)

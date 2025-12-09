@@ -99,6 +99,66 @@ public sealed class Interpreter
 
     #endregion
 
+    #region Call Helpers
+
+    private JSValue CallFunction(JSValue calleeVal, JSValue thisVal, JSValue[] args, bool isConstructor = false)
+    {
+        if (!calleeVal.IsObject)
+        {
+            _context.ThrowTypeError("Not a function");
+            return JSValue.Exception;
+        }
+
+        var calleeObj = calleeVal.AsObject();
+        if (calleeObj is JSFunction func)
+        {
+            // Native functions
+            if (func.NativeFunction != null || func.NativeFunctionMagic != null)
+            {
+                try
+                {
+                    var result = func.CallNative(thisVal, args);
+                    if (isConstructor && !result.IsObject)
+                        return thisVal;
+                    return result;
+                }
+                catch (JSException ex)
+                {
+                    _context.ThrowError(JSErrorType.Error, ex.Message);
+                    return JSValue.Exception;
+                }
+            }
+
+            // Bytecode functions
+            var fd = func.FunctionDef;
+            if (fd == null)
+            {
+                _context.ThrowTypeError("Not a callable function");
+                return JSValue.Exception;
+            }
+
+            var savedFrame = _currentFrame;
+            try
+            {
+                var frame = new CallFrame(fd, thisVal, args, func.VarRefs, savedFrame);
+                _currentFrame = frame;
+                var result = Execute(fd);
+                if (isConstructor && !result.IsObject)
+                    return thisVal;
+                return result;
+            }
+            finally
+            {
+                _currentFrame = savedFrame;
+            }
+        }
+
+        _context.ThrowTypeError("Not a function");
+        return JSValue.Exception;
+    }
+
+    #endregion
+
     #region Stack Operations
 
     /// <summary>
@@ -1976,6 +2036,12 @@ public sealed class Interpreter
             case OpCode.PushTrue:
                 PushTrue();
                 return true;
+            case OpCode.PushThis:
+                if (_currentFrame != null)
+                    Push(_currentFrame.ThisValue);
+                else
+                    Push(JSValue.Undefined);
+                return true;
             case OpCode.PushFalse:
                 PushFalse();
                 return true;
@@ -2121,6 +2187,18 @@ public sealed class Interpreter
                 PutArrayEl();
                 return true;
 
+                // Control flow (short forms handled in Execute loop)
+                case OpCode.IfFalse:
+                case OpCode.IfTrue:
+                case OpCode.Goto:
+                case OpCode.IfFalse8:
+                case OpCode.IfTrue8:
+                case OpCode.Goto8:
+                case OpCode.Goto16:
+                    // These are handled in Execute where the PC is available
+                    _context.ThrowTypeError($"Unexpected control flow opcode in ExecuteOpCode: {opcode}");
+                    return false;
+
             default:
                 // Unhandled opcode
                 _context.ThrowTypeError($"Unhandled opcode: {opcode}");
@@ -2141,12 +2219,36 @@ public sealed class Interpreter
         var bytecode = function.ByteCode.ToArray();
         int pc = 0;
 
-        while (pc < bytecode.Length && !HasException)
+        JSValue returnValue = JSValue.Undefined;
+        bool didReturn = false;
+
+        while (pc < bytecode.Length && !HasException && !didReturn)
         {
             var opcode = (OpCode)bytecode[pc++];
 
             switch (opcode)
             {
+                case OpCode.PushConst:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int constIdx = bytecode[pc] |
+                                       (bytecode[pc + 1] << 8) |
+                                       (bytecode[pc + 2] << 16) |
+                                       (bytecode[pc + 3] << 24);
+                        pc += 4;
+                        if (constIdx < 0 || constIdx >= function.Constants.Count)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Invalid constant index");
+                            return JSValue.Exception;
+                        }
+                        Push(function.Constants.Get(constIdx));
+                    }
+                    break;
+
                 case OpCode.PushI32:
                     if (pc + 4 > bytecode.Length)
                     {
@@ -2172,6 +2274,142 @@ public sealed class Interpreter
                         int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
                         pc += 2;
                         GetLoc(idx);
+                    }
+                    break;
+
+                // Function calls
+                case OpCode.Call:
+                case OpCode.TailCall:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        ushort argc = (ushort)(bytecode[pc] | (bytecode[pc + 1] << 8));
+                        pc += 2;
+                        if (_stackPointer < argc + 1)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow during call");
+                            return JSValue.Exception;
+                        }
+                        int calleeIndex = _stackPointer - argc - 1;
+                        var callee = _stack[calleeIndex];
+                        var args = new JSValue[argc];
+                        Array.Copy(_stack, _stackPointer - argc, args, 0, argc);
+
+                        var result = CallFunction(callee, JSValue.Undefined, args);
+                        if (result.IsException)
+                            return JSValue.Exception;
+
+                        // Pop callee and args
+                        _stackPointer -= argc + 1;
+                        // Push result
+                        Push(result);
+                    }
+                    break;
+
+                case OpCode.CallMethod:
+                case OpCode.TailCallMethod:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        ushort argc = (ushort)(bytecode[pc] | (bytecode[pc + 1] << 8));
+                        pc += 2;
+                        if (_stackPointer < argc + 2)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow during method call");
+                            return JSValue.Exception;
+                        }
+                        int thisIndex = _stackPointer - argc - 2;
+                        int calleeIndex = _stackPointer - argc - 1;
+                        var thisVal = _stack[thisIndex];
+                        var callee = _stack[calleeIndex];
+                        var args = new JSValue[argc];
+                        Array.Copy(_stack, _stackPointer - argc, args, 0, argc);
+
+                        var result = CallFunction(callee, thisVal, args);
+                        if (result.IsException)
+                            return JSValue.Exception;
+
+                        _stackPointer -= argc + 2;
+                        Push(result);
+                    }
+                    break;
+
+                case OpCode.CallConstructor:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        ushort argc = (ushort)(bytecode[pc] | (bytecode[pc + 1] << 8));
+                        pc += 2;
+                        if (_stackPointer < argc + 2)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow during constructor call");
+                            return JSValue.Exception;
+                        }
+                        int funcIndex = _stackPointer - argc - 2;
+                        int newTargetIndex = _stackPointer - argc - 1;
+                        var funcVal = _stack[funcIndex];
+                        var newTarget = _stack[newTargetIndex];
+                        var args = new JSValue[argc];
+                        Array.Copy(_stack, _stackPointer - argc, args, 0, argc);
+
+                        // Allocate a simple object with prototype from function if available
+                        JSValue thisVal = JSValue.FromObject(new JSObject());
+                        if (funcVal.IsObject && funcVal.AsObject() is JSFunction f && f.Prototype is JSObject proto)
+                        {
+                            thisVal = JSValue.FromObject(new JSObject(proto));
+                        }
+
+                        var result = CallFunction(funcVal, thisVal, args, isConstructor: true);
+                        if (result.IsException)
+                            return JSValue.Exception;
+
+                        _stackPointer -= argc + 2;
+                        Push(result);
+                    }
+                    break;
+
+                // Small fixed-arity calls: func arg0...argN
+                case OpCode.Call0:
+                case OpCode.Call1:
+                case OpCode.Call2:
+                case OpCode.Call3:
+                    {
+                        int argc = opcode switch
+                        {
+                            OpCode.Call0 => 0,
+                            OpCode.Call1 => 1,
+                            OpCode.Call2 => 2,
+                            OpCode.Call3 => 3,
+                            _ => 0
+                        };
+                        if (_stackPointer < argc + 1)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow during callN");
+                            return JSValue.Exception;
+                        }
+                        int calleeIndex = _stackPointer - argc - 1;
+                        var callee = _stack[calleeIndex];
+                        var args = new JSValue[argc];
+                        if (argc > 0)
+                        {
+                            Array.Copy(_stack, _stackPointer - argc, args, 0, argc);
+                        }
+
+                        var result = CallFunction(callee, JSValue.Undefined, args);
+                        if (result.IsException)
+                            return JSValue.Exception;
+
+                        _stackPointer -= argc + 1;
+                        Push(result);
                     }
                     break;
 
@@ -2578,6 +2816,132 @@ public sealed class Interpreter
                     }
                     break;
 
+                // Control flow: conditional and unconditional jumps (32-bit offsets)
+                case OpCode.IfFalse:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int offset = bytecode[pc] |
+                                    (bytecode[pc + 1] << 8) |
+                                    (bytecode[pc + 2] << 16) |
+                                    (bytecode[pc + 3] << 24);
+                        pc += 4;
+                        var cond = Pop();
+                        if (!JSValueConversion.ToBoolean(cond))
+                        {
+                            pc += offset;
+                        }
+                    }
+                    break;
+
+                case OpCode.IfTrue:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int offset = bytecode[pc] |
+                                    (bytecode[pc + 1] << 8) |
+                                    (bytecode[pc + 2] << 16) |
+                                    (bytecode[pc + 3] << 24);
+                        pc += 4;
+                        var cond = Pop();
+                        if (JSValueConversion.ToBoolean(cond))
+                        {
+                            pc += offset;
+                        }
+                    }
+                    break;
+
+                case OpCode.Goto:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int offset = bytecode[pc] |
+                                    (bytecode[pc + 1] << 8) |
+                                    (bytecode[pc + 2] << 16) |
+                                    (bytecode[pc + 3] << 24);
+                        pc += 4;
+                        pc += offset;
+                    }
+                    break;
+
+                // Control flow: short jumps (8-bit signed offsets)
+                case OpCode.IfFalse8:
+                    {
+                        if (pc >= bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        sbyte offset = unchecked((sbyte)bytecode[pc++]);
+                        var cond = Pop();
+                        if (!JSValueConversion.ToBoolean(cond))
+                        {
+                            pc += offset;
+                        }
+                    }
+                    break;
+
+                case OpCode.IfTrue8:
+                    {
+                        if (pc >= bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        sbyte offset = unchecked((sbyte)bytecode[pc++]);
+                        var cond = Pop();
+                        if (JSValueConversion.ToBoolean(cond))
+                        {
+                            pc += offset;
+                        }
+                    }
+                    break;
+
+                case OpCode.Goto8:
+                    {
+                        if (pc >= bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        sbyte offset = unchecked((sbyte)bytecode[pc++]);
+                        pc += offset;
+                    }
+                    break;
+
+                // Control flow: 16-bit signed offset jump
+                case OpCode.Goto16:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        short offset = (short)(bytecode[pc] | (bytecode[pc + 1] << 8));
+                        pc += 2;
+                        pc += offset;
+                    }
+                    break;
+
+                // Function returns
+                case OpCode.Return:
+                    returnValue = Pop();
+                    didReturn = true;
+                    break;
+                case OpCode.ReturnUndef:
+                    returnValue = JSValue.Undefined;
+                    didReturn = true;
+                    break;
+
                 default:
                     if (!ExecuteOpCode(opcode))
                         return JSValue.Exception;
@@ -2585,7 +2949,7 @@ public sealed class Interpreter
             }
         }
 
-        return _stackPointer > 0 ? Pop() : JSValue.Undefined;
+        return didReturn ? returnValue : (_stackPointer > 0 ? Pop() : JSValue.Undefined);
     }
 
     #endregion

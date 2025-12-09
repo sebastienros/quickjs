@@ -100,6 +100,16 @@ L_skip:
 - Jump optimization: `optimize_jumps` in `quickjs.c`
 - Break/continue handling in compiler: `emit_break` / `emit_continue` (≈ lines 27707+)
 
+## C# vs QuickJS Mapping
+
+| Concept | QuickJS (C) | C# Implementation |
+|---------|-------------|-------------------|
+| Program Counter | `pc` pointer into bytecode | `pc` local in `Interpreter.Execute` |
+| Stack | `sp` array of `JSValue` | `_stack` array + `_stackPointer` |
+| `OP_goto*` | `pc += offset` | same; `Goto`, `Goto8`, `Goto16` cases read signed offsets |
+| `OP_if_true/false*` | pop cond, `ToBoolean`, branch | `JSValueConversion.ToBoolean` then adjust `pc` |
+| Labels | Patched to offsets by compiler (`optimize_jumps`) | Tests patch raw offsets; compiler will emit offsets once implemented |
+
 ## Tests to Add (when implementing)
 
 - `if/else` branches with truthy/falsy values
