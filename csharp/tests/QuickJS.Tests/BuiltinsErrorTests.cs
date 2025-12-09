@@ -15,12 +15,12 @@ public class BuiltinsErrorTests
     }
 
     [Theory]
-    [InlineData(JSErrorType.Error, "Error")]
-    [InlineData(JSErrorType.TypeError, "TypeError")]
-    [InlineData(JSErrorType.RangeError, "RangeError")]
-    [InlineData(JSErrorType.ReferenceError, "ReferenceError")]
-    [InlineData(JSErrorType.SyntaxError, "SyntaxError")]
-    public void ErrorConstructors_CreateObjectsWithNameAndMessage(JSErrorType type, string name)
+    [InlineData("Error")]
+    [InlineData("TypeError")]
+    [InlineData("RangeError")]
+    [InlineData("ReferenceError")]
+    [InlineData("SyntaxError")]
+    public void ErrorConstructors_CreateObjectsWithNameAndMessage(string name)
     {
         var ctorVal = _context.GetGlobalProperty(name);
         Assert.True(ctorVal.IsObject);
