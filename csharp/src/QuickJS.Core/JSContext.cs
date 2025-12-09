@@ -614,6 +614,7 @@ public sealed class JSContext : IDisposable
         InitializeNumberAndMath();
         InitializeStringConstructor();
         InitializeArrayConstructor();
+        InitializeRegExpConstructor();
     }
 
     private void InitializeObjectConstructor()
@@ -951,6 +952,119 @@ public sealed class JSContext : IDisposable
         arrayProto.Set("pop", JSValue.FromObject(new JSFunction(ArrayPop, "pop", 0, functionProto)));
 
         _globalObject.Set("Array", JSValue.FromObject(arrayCtorFn));
+    }
+
+    private void InitializeRegExpConstructor()
+    {
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+
+        var regexProto = new JSObject(objectProto, JSClassId.RegExp);
+        SetClassPrototype(JSClassId.RegExp, regexProto);
+
+        JSValue RegExpCtor(JSValue thisVal, JSValue[] args)
+        {
+            // RegExp(pattern, flags)
+            string pattern = args.Length > 0 ? JSValueConversion.ToString(args[0]) : string.Empty;
+            string flags = args.Length > 1 ? JSValueConversion.ToString(args[1]) : string.Empty;
+
+            var options = System.Text.RegularExpressions.RegexOptions.ECMAScript;
+            bool global = false;
+            bool ignoreCase = false;
+            bool multiline = false;
+
+            foreach (var ch in flags)
+            {
+                switch (ch)
+                {
+                    case 'g': global = true; break;
+                    case 'i': ignoreCase = true; options |= System.Text.RegularExpressions.RegexOptions.IgnoreCase; break;
+                    case 'm': multiline = true; options |= System.Text.RegularExpressions.RegexOptions.Multiline; break;
+                    default:
+                        return ThrowSyntaxError($"Invalid regular expression flag '{ch}'");
+                }
+            }
+
+            var re = new System.Text.RegularExpressions.Regex(pattern, options);
+            var obj = new JSObject(regexProto, JSClassId.RegExp)
+            {
+                HostData = re
+            };
+            obj.Set("source", JSValue.FromString(pattern));
+            obj.Set("flags", JSValue.FromString(flags));
+            obj.Set("global", JSValue.FromBoolean(global));
+            obj.Set("ignoreCase", JSValue.FromBoolean(ignoreCase));
+            obj.Set("multiline", JSValue.FromBoolean(multiline));
+            obj.Set("lastIndex", JSValue.FromInt32(0));
+            return JSValue.FromObject(obj);
+        }
+
+        var regexCtorFn = new JSFunction(RegExpCtor, "RegExp", 2, functionProto);
+        regexCtorFn.Set("prototype", JSValue.FromObject(regexProto));
+        regexProto.Set("constructor", JSValue.FromObject(regexCtorFn));
+
+        // RegExp.prototype.exec
+        JSValue RegExpExec(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.RegExp)
+                return ThrowTypeError("RegExp.prototype.exec called on non-RegExp");
+
+            var obj = thisVal.AsObject();
+            var re = obj.HostData as System.Text.RegularExpressions.Regex;
+            var input = args.Length > 0 ? JSValueConversion.ToString(args[0]) : string.Empty;
+            bool global = obj.Get("global").ToBoolean();
+            int startIndex = 0;
+            if (global)
+            {
+                startIndex = obj.Get("lastIndex").ToInt32();
+            }
+
+            var match = re?.Match(input, Math.Max(0, Math.Min(startIndex, input.Length)));
+            if (match == null || !match.Success)
+            {
+                if (global)
+                    obj.Set("lastIndex", JSValue.FromInt32(0));
+                return JSValue.Null;
+            }
+
+            if (global)
+            {
+                obj.Set("lastIndex", JSValue.FromInt32(match.Index + match.Length));
+            }
+
+            // Build result array
+            var arr = new JSObject(GetClassPrototype(JSClassId.Array), JSClassId.Array);
+            for (int i = 0; i < match.Groups.Count; i++)
+            {
+                var val = match.Groups[i].Value;
+                arr.Set((uint)i, JSValue.FromString(val));
+            }
+            arr.Set("length", JSValue.FromInt32(match.Groups.Count));
+            arr.Set("index", JSValue.FromInt32(match.Index));
+            arr.Set("input", JSValue.FromString(input));
+            return JSValue.FromObject(arr);
+        }
+
+        // RegExp.prototype.test
+        JSValue RegExpTest(JSValue thisVal, JSValue[] args)
+        {
+            var res = RegExpExec(thisVal, args);
+            return JSValue.FromBoolean(!res.IsNull);
+        }
+
+        regexProto.Set("exec", JSValue.FromObject(new JSFunction(RegExpExec, "exec", 1, functionProto)));
+        regexProto.Set("test", JSValue.FromObject(new JSFunction(RegExpTest, "test", 1, functionProto)));
+        regexProto.Set("toString", JSValue.FromObject(new JSFunction((thisVal, args) =>
+        {
+            if (!thisVal.IsObject || thisVal.AsObject().ClassId != JSClassId.RegExp)
+                return ThrowTypeError("RegExp.prototype.toString called on non-RegExp");
+            var obj = thisVal.AsObject();
+            var src = obj.Get("source").ToString();
+            var flags = obj.Get("flags").ToString();
+            return JSValue.FromString($"/{src}/{flags}");
+        }, "toString", 0, functionProto)));
+
+        _globalObject.Set("RegExp", JSValue.FromObject(regexCtorFn));
     }
 
     #endregion

@@ -59,6 +59,9 @@ public class JSObject
     // Optional internal data for primitive wrappers and special objects
     private JSValue _internalValue;
 
+    // Optional host data for built-ins (e.g., RegExp, Promise, Map backing)
+    internal object? HostData;
+
     // Array length tracking
     private uint _arrayLength;
 
