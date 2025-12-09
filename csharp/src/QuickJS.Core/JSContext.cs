@@ -644,6 +644,8 @@ public sealed class JSContext : IDisposable
         InitializeCollections();
         InitializeTypedArrays();
         InitializeDate();
+        InitializeSymbol();
+        InitializeReflect();
     }
 
     private void InitializeObjectConstructor()
@@ -4257,6 +4259,334 @@ public sealed class JSContext : IDisposable
         dateProto.Set("toGMTString", JSValue.FromObject(new JSFunction(ToUTCString, "toGMTString", 0, functionProto)));
 
         _globalObject.Set("Date", JSValue.FromObject(dateCtor));
+    }
+
+    private void InitializeSymbol()
+    {
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+
+        // Symbol is not a constructor (cannot use new)
+        // Symbol([description]) - creates a new unique symbol
+        JSValue SymbolFunc(JSValue thisVal, JSValue[] args)
+        {
+            var description = args.Length > 0 && !args[0].IsUndefined
+                ? JSValueConversion.ToString(args[0])
+                : null;
+            return JSValue.FromSymbol(new JSSymbol(description));
+        }
+
+        var symbolFunc = new JSFunction(SymbolFunc, "Symbol", 0, functionProto);
+        symbolFunc.SetPrototype(functionProto);
+
+        // Symbol.for(key) - returns a symbol from the global registry
+        JSValue SymbolFor(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length == 0)
+                return ThrowTypeError("Symbol.for requires an argument");
+            var key = JSValueConversion.ToString(args[0]);
+            return JSValue.FromSymbol(JSSymbol.For(key));
+        }
+
+        // Symbol.keyFor(sym) - returns the key for a global symbol
+        JSValue SymbolKeyFor(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length == 0 || !args[0].IsSymbol)
+                return ThrowTypeError("Symbol.keyFor requires a symbol argument");
+            var sym = args[0].AsSymbol();
+            var key = JSSymbol.KeyFor(sym);
+            return key != null ? JSValue.FromString(key) : JSValue.Undefined;
+        }
+
+        symbolFunc.Set("for", JSValue.FromObject(new JSFunction(SymbolFor, "for", 1, functionProto)));
+        symbolFunc.Set("keyFor", JSValue.FromObject(new JSFunction(SymbolKeyFor, "keyFor", 1, functionProto)));
+
+        // Well-known symbols
+        symbolFunc.Set("iterator", JSValue.FromSymbol(JSSymbol.Iterator));
+        symbolFunc.Set("asyncIterator", JSValue.FromSymbol(JSSymbol.AsyncIterator));
+        symbolFunc.Set("toStringTag", JSValue.FromSymbol(JSSymbol.ToStringTag));
+        symbolFunc.Set("toPrimitive", JSValue.FromSymbol(JSSymbol.ToPrimitive));
+        symbolFunc.Set("hasInstance", JSValue.FromSymbol(JSSymbol.HasInstance));
+        symbolFunc.Set("isConcatSpreadable", JSValue.FromSymbol(JSSymbol.IsConcatSpreadable));
+        symbolFunc.Set("species", JSValue.FromSymbol(JSSymbol.Species));
+        symbolFunc.Set("match", JSValue.FromSymbol(JSSymbol.Match));
+        symbolFunc.Set("matchAll", JSValue.FromSymbol(JSSymbol.MatchAll));
+        symbolFunc.Set("replace", JSValue.FromSymbol(JSSymbol.Replace));
+        symbolFunc.Set("search", JSValue.FromSymbol(JSSymbol.Search));
+        symbolFunc.Set("split", JSValue.FromSymbol(JSSymbol.Split));
+        symbolFunc.Set("unscopables", JSValue.FromSymbol(JSSymbol.Unscopables));
+
+        _globalObject.Set("Symbol", JSValue.FromObject(symbolFunc));
+    }
+
+    private void InitializeReflect()
+    {
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+
+        // Reflect is not a constructor, just a namespace object
+        var reflectObj = new JSObject(objectProto, JSClassId.Object);
+
+        // Reflect.apply(target, thisArg, args)
+        JSValue ReflectApply(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.apply requires a function");
+
+            var target = args[0].AsObject();
+            if (target is not JSFunction fn)
+                return ThrowTypeError("Reflect.apply requires a function");
+
+            var thisArg = args.Length > 1 ? args[1] : JSValue.Undefined;
+            var argsArray = args.Length > 2 && args[2].IsObject && args[2].AsObject() is JSArray arr
+                ? arr.ToArray()
+                : Array.Empty<JSValue>();
+
+            return fn.CallNative(thisArg, argsArray);
+        }
+
+        // Reflect.construct(target, args [, newTarget])
+        JSValue ReflectConstruct(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.construct requires a constructor");
+
+            var target = args[0].AsObject();
+            if (target is not JSFunction fn)
+                return ThrowTypeError("Reflect.construct requires a constructor");
+
+            var argsArray = args.Length > 1 && args[1].IsObject && args[1].AsObject() is JSArray arr
+                ? arr.ToArray()
+                : Array.Empty<JSValue>();
+
+            // Simple construction (ignores newTarget for now)
+            return fn.CallNative(JSValue.Undefined, argsArray);
+        }
+
+        // Reflect.defineProperty(target, key, descriptor)
+        JSValue ReflectDefineProperty(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.defineProperty requires an object");
+
+            var target = args[0].AsObject();
+            var key = args.Length > 1 ? JSValueConversion.ToString(args[1]) : "";
+            var desc = args.Length > 2 && args[2].IsObject ? args[2].AsObject() : null;
+
+            if (desc == null)
+                return JSValue.False;
+
+            try
+            {
+                var valueVal = desc.Get("value");
+                var writableVal = desc.Get("writable");
+                var enumerableVal = desc.Get("enumerable");
+                var configurableVal = desc.Get("configurable");
+                var getVal = desc.Get("get");
+                var setVal = desc.Get("set");
+
+                var flags = PropertyFlags.None;
+                if (!writableVal.IsUndefined && JSValueConversion.ToBoolean(writableVal))
+                    flags |= PropertyFlags.Writable;
+                if (!enumerableVal.IsUndefined && JSValueConversion.ToBoolean(enumerableVal))
+                    flags |= PropertyFlags.Enumerable;
+                if (!configurableVal.IsUndefined && JSValueConversion.ToBoolean(configurableVal))
+                    flags |= PropertyFlags.Configurable;
+
+                if (!getVal.IsUndefined || !setVal.IsUndefined)
+                {
+                    // Accessor descriptor
+                    var getter = getVal.IsUndefined ? JSValue.Undefined : getVal;
+                    var setter = setVal.IsUndefined ? JSValue.Undefined : setVal;
+                    target.DefineProperty(key, new PropertyDescriptor(getter, setter, flags));
+                }
+                else
+                {
+                    // Data descriptor
+                    target.DefineProperty(key, new PropertyDescriptor(valueVal, flags));
+                }
+                return JSValue.True;
+            }
+            catch
+            {
+                return JSValue.False;
+            }
+        }
+
+        // Reflect.deleteProperty(target, key)
+        JSValue ReflectDeleteProperty(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.deleteProperty requires an object");
+
+            var target = args[0].AsObject();
+            var key = args.Length > 1 ? JSValueConversion.ToString(args[1]) : "";
+
+            try
+            {
+                return JSValue.FromBoolean(target.Delete(key));
+            }
+            catch
+            {
+                return JSValue.False;
+            }
+        }
+
+        // Reflect.get(target, key [, receiver])
+        JSValue ReflectGet(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.get requires an object");
+
+            var target = args[0].AsObject();
+            var key = args.Length > 1 ? JSValueConversion.ToString(args[1]) : "";
+
+            return target.Get(key);
+        }
+
+        // Reflect.getOwnPropertyDescriptor(target, key)
+        JSValue ReflectGetOwnPropertyDescriptor(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.getOwnPropertyDescriptor requires an object");
+
+            var target = args[0].AsObject();
+            var key = args.Length > 1 ? JSValueConversion.ToString(args[1]) : "";
+
+            if (!target.TryGetOwnPropertyDescriptor(key, out var desc) || desc == null)
+                return JSValue.Undefined;
+
+            var descObj = new JSObject(objectProto, JSClassId.Object);
+            descObj.Set("value", desc.Value);
+            descObj.Set("writable", JSValue.FromBoolean(desc.IsWritable));
+            descObj.Set("enumerable", JSValue.FromBoolean(desc.IsEnumerable));
+            descObj.Set("configurable", JSValue.FromBoolean(desc.IsConfigurable));
+            return JSValue.FromObject(descObj);
+        }
+
+        // Reflect.getPrototypeOf(target)
+        JSValue ReflectGetPrototypeOf(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.getPrototypeOf requires an object");
+
+            var target = args[0].AsObject();
+            var proto = target.Prototype;
+            return proto != null ? JSValue.FromObject(proto) : JSValue.Null;
+        }
+
+        // Reflect.has(target, key)
+        JSValue ReflectHas(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.has requires an object");
+
+            var target = args[0].AsObject();
+            var key = args.Length > 1 ? JSValueConversion.ToString(args[1]) : "";
+
+            return JSValue.FromBoolean(target.HasProperty(key));
+        }
+
+        // Reflect.isExtensible(target)
+        JSValue ReflectIsExtensible(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.isExtensible requires an object");
+
+            var target = args[0].AsObject();
+            return JSValue.FromBoolean(target.IsExtensible);
+        }
+
+        // Reflect.ownKeys(target)
+        JSValue ReflectOwnKeys(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.ownKeys requires an object");
+
+            var target = args[0].AsObject();
+            var keys = target.GetOwnPropertyNames();
+            var array = new JSArray();
+            foreach (var key in keys)
+            {
+                array.Push(JSValue.FromString(key));
+            }
+            return JSValue.FromObject(array);
+        }
+
+        // Reflect.preventExtensions(target)
+        JSValue ReflectPreventExtensions(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.preventExtensions requires an object");
+
+            var target = args[0].AsObject();
+            try
+            {
+                target.PreventExtensions();
+                return JSValue.True;
+            }
+            catch
+            {
+                return JSValue.False;
+            }
+        }
+
+        // Reflect.set(target, key, value [, receiver])
+        JSValue ReflectSet(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.set requires an object");
+
+            var target = args[0].AsObject();
+            var key = args.Length > 1 ? JSValueConversion.ToString(args[1]) : "";
+            var value = args.Length > 2 ? args[2] : JSValue.Undefined;
+
+            try
+            {
+                target.Set(key, value);
+                return JSValue.True;
+            }
+            catch
+            {
+                return JSValue.False;
+            }
+        }
+
+        // Reflect.setPrototypeOf(target, proto)
+        JSValue ReflectSetPrototypeOf(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !args[0].IsObject)
+                return ThrowTypeError("Reflect.setPrototypeOf requires an object");
+
+            var target = args[0].AsObject();
+            var proto = args.Length > 1 && args[1].IsObject ? args[1].AsObject() : null;
+
+            try
+            {
+                target.SetPrototype(proto);
+                return JSValue.True;
+            }
+            catch
+            {
+                return JSValue.False;
+            }
+        }
+
+        reflectObj.Set("apply", JSValue.FromObject(new JSFunction(ReflectApply, "apply", 3, functionProto)));
+        reflectObj.Set("construct", JSValue.FromObject(new JSFunction(ReflectConstruct, "construct", 2, functionProto)));
+        reflectObj.Set("defineProperty", JSValue.FromObject(new JSFunction(ReflectDefineProperty, "defineProperty", 3, functionProto)));
+        reflectObj.Set("deleteProperty", JSValue.FromObject(new JSFunction(ReflectDeleteProperty, "deleteProperty", 2, functionProto)));
+        reflectObj.Set("get", JSValue.FromObject(new JSFunction(ReflectGet, "get", 2, functionProto)));
+        reflectObj.Set("getOwnPropertyDescriptor", JSValue.FromObject(new JSFunction(ReflectGetOwnPropertyDescriptor, "getOwnPropertyDescriptor", 2, functionProto)));
+        reflectObj.Set("getPrototypeOf", JSValue.FromObject(new JSFunction(ReflectGetPrototypeOf, "getPrototypeOf", 1, functionProto)));
+        reflectObj.Set("has", JSValue.FromObject(new JSFunction(ReflectHas, "has", 2, functionProto)));
+        reflectObj.Set("isExtensible", JSValue.FromObject(new JSFunction(ReflectIsExtensible, "isExtensible", 1, functionProto)));
+        reflectObj.Set("ownKeys", JSValue.FromObject(new JSFunction(ReflectOwnKeys, "ownKeys", 1, functionProto)));
+        reflectObj.Set("preventExtensions", JSValue.FromObject(new JSFunction(ReflectPreventExtensions, "preventExtensions", 1, functionProto)));
+        reflectObj.Set("set", JSValue.FromObject(new JSFunction(ReflectSet, "set", 3, functionProto)));
+        reflectObj.Set("setPrototypeOf", JSValue.FromObject(new JSFunction(ReflectSetPrototypeOf, "setPrototypeOf", 2, functionProto)));
+
+        _globalObject.Set("Reflect", JSValue.FromObject(reflectObj));
     }
 
     #endregion

@@ -209,6 +209,23 @@ public readonly struct JSValue : IEquatable<JSValue>
         return new JSValue(JSValueType.Object, obj);
     }
 
+    /// <summary>
+    /// Creates a JavaScript symbol value.
+    /// </summary>
+    /// <param name="symbol">The JSSymbol instance.</param>
+    /// <returns>A JSValue representing the symbol.</returns>
+    /// <exception cref="ArgumentNullException">Thrown if <paramref name="symbol"/> is null.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static JSValue FromSymbol(JSSymbol symbol)
+    {
+        if (symbol is null)
+        {
+            ThrowArgumentNull(nameof(symbol));
+        }
+
+        return new JSValue(JSValueType.Symbol, symbol);
+    }
+
     #endregion
 
     #region Type Properties
@@ -519,6 +536,38 @@ public readonly struct JSValue : IEquatable<JSValue>
     }
 
     /// <summary>
+    /// Attempts to get this value as a JSSymbol.
+    /// </summary>
+    /// <param name="result">The symbol if successful.</param>
+    /// <returns>True if this value is a symbol.</returns>
+    public bool TryGetSymbol([NotNullWhen(true)] out JSSymbol? result)
+    {
+        if (_tag == JSValueType.Symbol && _objectValue is JSSymbol symbol)
+        {
+            result = symbol;
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Gets this value as a JSSymbol.
+    /// </summary>
+    /// <returns>The JSSymbol.</returns>
+    /// <exception cref="InvalidOperationException">Thrown if this value is not a symbol.</exception>
+    public JSSymbol AsSymbol()
+    {
+        if (TryGetSymbol(out var result))
+        {
+            return result;
+        }
+
+        throw new InvalidOperationException($"Cannot convert {_tag} to Symbol.");
+    }
+
+    /// <summary>
     /// Converts this value to its string representation.
     /// </summary>
     /// <returns>The string representation of this value.</returns>
@@ -541,7 +590,7 @@ public readonly struct JSValue : IEquatable<JSValue>
             JSValueType.Int => _int64Value.ToString(CultureInfo.InvariantCulture),
             JSValueType.Float64 => FormatDouble(_float64Value),
             JSValueType.String => _objectValue as string ?? "",
-            JSValueType.Symbol => "Symbol()",
+            JSValueType.Symbol => _objectValue is JSSymbol sym ? sym.ToString() : "Symbol()",
             JSValueType.Object => "[object Object]",
             JSValueType.BigInt => _objectValue?.ToString() ?? "0n",
             JSValueType.ShortBigInt => $"{_int64Value}n",
