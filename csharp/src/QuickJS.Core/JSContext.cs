@@ -648,6 +648,7 @@ public sealed class JSContext : IDisposable
         InitializeReflect();
         InitializeProxy();
         InitializeConsole();
+        InitializeTimers();
     }
 
     private void InitializeObjectConstructor()
@@ -4698,6 +4699,143 @@ public sealed class JSContext : IDisposable
 
     #endregion
 
+    #region Timer Initialization
+
+    private JSEventLoop? _eventLoop;
+
+    /// <summary>
+    /// Gets the event loop for this context.
+    /// </summary>
+    public JSEventLoop EventLoop => _eventLoop ?? throw new InvalidOperationException("Event loop not initialized");
+
+    private void InitializeTimers()
+    {
+        // Create event loop
+        _eventLoop = new JSEventLoop(this);
+
+        // Helper function to check if a value is a function
+        bool IsFunction(JSValue value) => value.IsObject && value.AsObject() is JSFunction;
+
+        // setTimeout(callback, delay, ...args)
+        JSValue SetTimeoutFn(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !IsFunction(args[0]))
+            {
+                return JSValue.FromInt32(0);
+            }
+
+            var callback = args[0].AsObject() as JSFunction;
+            if (callback == null)
+            {
+                return JSValue.FromInt32(0);
+            }
+
+            var delay = args.Length > 1 ? args[1].ToInt32() : 0;
+            var callbackArgs = args.Length > 2 ? SliceArray(args, 2) : Array.Empty<JSValue>();
+
+            var id = _eventLoop!.SetTimeout(callback, delay, callbackArgs);
+            return JSValue.FromInt32(id);
+        }
+
+        // clearTimeout(id)
+        JSValue ClearTimeoutFn(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length > 0)
+            {
+                var id = args[0].ToInt32();
+                _eventLoop!.ClearTimeout(id);
+            }
+            return JSValue.Undefined;
+        }
+
+        // setInterval(callback, delay, ...args)
+        JSValue SetIntervalFn(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !IsFunction(args[0]))
+            {
+                return JSValue.FromInt32(0);
+            }
+
+            var callback = args[0].AsObject() as JSFunction;
+            if (callback == null)
+            {
+                return JSValue.FromInt32(0);
+            }
+
+            var delay = args.Length > 1 ? args[1].ToInt32() : 0;
+            var callbackArgs = args.Length > 2 ? SliceArray(args, 2) : Array.Empty<JSValue>();
+
+            var id = _eventLoop!.SetInterval(callback, delay, callbackArgs);
+            return JSValue.FromInt32(id);
+        }
+
+        // clearInterval(id)
+        JSValue ClearIntervalFn(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length > 0)
+            {
+                var id = args[0].ToInt32();
+                _eventLoop!.ClearInterval(id);
+            }
+            return JSValue.Undefined;
+        }
+
+        // queueMicrotask(callback)
+        JSValue QueueMicrotaskFn(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 1 || !IsFunction(args[0]))
+            {
+                throw new JSTypeError("queueMicrotask requires a function argument");
+            }
+
+            var callback = args[0].AsObject() as JSFunction;
+            if (callback == null)
+            {
+                throw new JSTypeError("queueMicrotask requires a function argument");
+            }
+
+            _eventLoop!.EnqueueMicrotask(() =>
+            {
+                try
+                {
+                    callback.CallNative(JSValue.Undefined, Array.Empty<JSValue>());
+                }
+                catch
+                {
+                    // Microtask errors are silently ignored in standard behavior
+                }
+            });
+
+            return JSValue.Undefined;
+        }
+
+        // Register global timer functions
+        var setTimeout = new JSFunction(SetTimeoutFn, "setTimeout", 1);
+        var clearTimeout = new JSFunction(ClearTimeoutFn, "clearTimeout", 1);
+        var setInterval = new JSFunction(SetIntervalFn, "setInterval", 1);
+        var clearInterval = new JSFunction(ClearIntervalFn, "clearInterval", 1);
+        var queueMicrotask = new JSFunction(QueueMicrotaskFn, "queueMicrotask", 1);
+
+        _globalObject.Set("setTimeout", JSValue.FromObject(setTimeout));
+        _globalObject.Set("clearTimeout", JSValue.FromObject(clearTimeout));
+        _globalObject.Set("setInterval", JSValue.FromObject(setInterval));
+        _globalObject.Set("clearInterval", JSValue.FromObject(clearInterval));
+        _globalObject.Set("queueMicrotask", JSValue.FromObject(queueMicrotask));
+    }
+
+    private static JSValue[] SliceArray(JSValue[] array, int start)
+    {
+        if (start >= array.Length)
+        {
+            return Array.Empty<JSValue>();
+        }
+        var result = new JSValue[array.Length - start];
+        Array.Copy(array, start, result, 0, result.Length);
+        return result;
+    }
+
+    #endregion
+
     #region IDisposable
 
     /// <summary>
@@ -4708,6 +4846,10 @@ public sealed class JSContext : IDisposable
         if (_isDisposed) return;
 
         _isDisposed = true;
+
+        // Clear event loop timers
+        _eventLoop?.ClearAllTimers();
+        _eventLoop?.ClearAllMicrotasks();
 
         // Remove from runtime
         _runtime.RemoveContext(this);

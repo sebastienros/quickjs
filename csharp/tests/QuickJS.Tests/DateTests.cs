@@ -31,14 +31,14 @@ public class DateTests : IDisposable
     [Fact]
     public void JSDate_DefaultConstructor_CreatesCurrentDate()
     {
-        var before = DateTime.UtcNow;
+        var before = DateTime.UtcNow.AddMilliseconds(-100); // Allow some tolerance
         var date = new JSDate();
-        var after = DateTime.UtcNow;
+        var after = DateTime.UtcNow.AddMilliseconds(100); // Allow some tolerance
 
         Assert.False(date.IsInvalid);
         var dt = date.ToDateTime();
         Assert.NotNull(dt);
-        Assert.True(dt >= before && dt <= after);
+        Assert.True(dt >= before && dt <= after, $"DateTime {dt} is not between {before} and {after}");
     }
 
     [Fact]

@@ -53,11 +53,11 @@ Use `#if` directives when needed:
 | Phase 5: Runtime Objects | ✅ Complete | 4/4 | ~500 |
 | Phase 6: VM & Interpreter | ✅ Complete | 7/7 | ~704 |
 | Phase 7: Built-in Objects | ✅ Complete | 13/13 | ~1077 |
-| Phase 8: Standard Library | 🔄 In Progress | 1/3 | ~38 |
+| Phase 8: Standard Library | 🔄 In Progress | 2/3 | ~73 |
 
-**Total Tests: 2172** (all passing, 0 skipped)
+**Total Tests: 2207** (all passing, 0 skipped)
 
-**Latest Commit**: `step-8.1-console`
+**Latest Commit**: `step-8.2-timers`
 
 # Detailed Implementation Plan
 
@@ -724,14 +724,15 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 8.2: Timers and Event Loop
+### Step 8.2: Timers and Event Loop ✅
 **Commit**: `step-8.2-timers`  
 **Doc**: `docs/54-event-loop.md`
 
-- [ ] Implement setTimeout/clearTimeout
-- [ ] Implement setInterval/clearInterval
-- [ ] Implement event loop
-- [ ] Write timer tests
+- [x] Implement setTimeout/clearTimeout
+- [x] Implement setInterval/clearInterval
+- [x] Implement queueMicrotask
+- [x] Implement JSEventLoop
+- [x] Write timer tests
 
 ---
 
