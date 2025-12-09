@@ -577,13 +577,13 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 7.2: Error Objects
+### Step 7.2: Error Objects ✅
 **Commit**: `step-7.2-error-objects`  
 **Doc**: `docs/41-error-objects.md`
 
-- [ ] Implement Error hierarchy
+- [x] Implement Error hierarchy
 - [ ] Implement stack traces
-- [ ] Write error tests
+- [x] Write error tests
 
 ---
 

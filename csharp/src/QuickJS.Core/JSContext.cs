@@ -84,6 +84,9 @@ public sealed class JSContext : IDisposable
     // Random state for Math.random()
     private ulong _randomState;
 
+    // Error prototypes by error type
+    private readonly Dictionary<JSErrorType, JSObject> _errorPrototypes = new();
+
     // Current exception for this context (separate from runtime exception)
     private JSValue _currentException = JSValue.Undefined;
     private bool _hasException;
@@ -361,7 +364,13 @@ public sealed class JSContext : IDisposable
     public JSValue ThrowError(JSErrorType errorType, string message)
     {
         // Create an error object to hold the exception info
-        var errorObject = new JSObject(GetClassPrototype(JSClassId.Error), JSClassId.Error);
+        JSObject proto;
+        if (!_errorPrototypes.TryGetValue(errorType, out proto!))
+        {
+            proto = GetClassPrototype(JSClassId.Error)!;
+        }
+
+        var errorObject = new JSObject(proto, JSClassId.Error);
         errorObject.Set("name", JSValue.FromString(errorType.ToString()));
         errorObject.Set("message", JSValue.FromString(message));
         SetException(JSValue.FromObject(errorObject));
@@ -601,6 +610,7 @@ public sealed class JSContext : IDisposable
     {
         InitializeObjectConstructor();
         InitializeFunctionConstructor();
+        InitializeErrorConstructors();
     }
 
     private void InitializeObjectConstructor()
@@ -705,6 +715,48 @@ public sealed class JSContext : IDisposable
 
         // Attach global Function
         _globalObject.Set("Function", JSValue.FromObject(functionCtorFunc));
+    }
+
+    private void InitializeErrorConstructors()
+    {
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+        var baseErrorProto = GetClassPrototype(JSClassId.Error)!;
+
+        // Register base Error
+        RegisterErrorConstructor(JSErrorType.Error, "Error", baseErrorProto, functionProto);
+
+        // Derived errors
+        RegisterErrorConstructor(JSErrorType.TypeError, "TypeError", new JSObject(baseErrorProto, JSClassId.Error), functionProto);
+        RegisterErrorConstructor(JSErrorType.RangeError, "RangeError", new JSObject(baseErrorProto, JSClassId.Error), functionProto);
+        RegisterErrorConstructor(JSErrorType.ReferenceError, "ReferenceError", new JSObject(baseErrorProto, JSClassId.Error), functionProto);
+        RegisterErrorConstructor(JSErrorType.SyntaxError, "SyntaxError", new JSObject(baseErrorProto, JSClassId.Error), functionProto);
+        RegisterErrorConstructor(JSErrorType.URIError, "URIError", new JSObject(baseErrorProto, JSClassId.Error), functionProto);
+        RegisterErrorConstructor(JSErrorType.EvalError, "EvalError", new JSObject(baseErrorProto, JSClassId.Error), functionProto);
+        RegisterErrorConstructor(JSErrorType.InternalError, "InternalError", new JSObject(baseErrorProto, JSClassId.Error), functionProto);
+        RegisterErrorConstructor(JSErrorType.AggregateError, "AggregateError", new JSObject(baseErrorProto, JSClassId.Error), functionProto);
+    }
+
+    private void RegisterErrorConstructor(JSErrorType type, string name, JSObject proto, JSObject functionProto)
+    {
+        JSValue ErrorCtor(JSValue thisVal, JSValue[] args)
+        {
+            string message = args.Length > 0 ? args[0].ToString() ?? string.Empty : string.Empty;
+            var errObj = new JSObject(proto, JSClassId.Error);
+            errObj.Set("name", JSValue.FromString(name));
+            if (!string.IsNullOrEmpty(message))
+            {
+                errObj.Set("message", JSValue.FromString(message));
+            }
+            return JSValue.FromObject(errObj);
+        }
+
+        var ctor = new JSFunction(ErrorCtor, name, 1, functionProto);
+        ctor.Set("prototype", JSValue.FromObject(proto));
+        proto.Set("constructor", JSValue.FromObject(ctor));
+        proto.Set("name", JSValue.FromString(name));
+
+        _globalObject.Set(name, JSValue.FromObject(ctor));
+        _errorPrototypes[type] = proto;
     }
 
     #endregion
