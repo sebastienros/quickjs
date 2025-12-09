@@ -91,6 +91,9 @@ public sealed class JSContext : IDisposable
     private JSValue _currentException = JSValue.Undefined;
     private bool _hasException;
 
+    // Microtask queue for Promises
+    private readonly Queue<Action> _microtasks = new();
+
     // Disposal tracking
     private bool _isDisposed;
 
@@ -356,6 +359,26 @@ public sealed class JSContext : IDisposable
     }
 
     /// <summary>
+    /// Enqueues a microtask (used by Promises).
+    /// </summary>
+    internal void EnqueueMicrotask(Action action)
+    {
+        _microtasks.Enqueue(action);
+    }
+
+    /// <summary>
+    /// Runs all queued microtasks.
+    /// </summary>
+    public void RunMicrotasks()
+    {
+        while (_microtasks.Count > 0)
+        {
+            var task = _microtasks.Dequeue();
+            task();
+        }
+    }
+
+    /// <summary>
     /// Throws a JavaScript error.
     /// </summary>
     /// <param name="errorType">The type of error.</param>
@@ -616,6 +639,7 @@ public sealed class JSContext : IDisposable
         InitializeArrayConstructor();
         InitializeRegExpConstructor();
         InitializeJSON();
+        InitializePromise();
     }
 
     private void InitializeObjectConstructor()
@@ -1186,6 +1210,200 @@ public sealed class JSContext : IDisposable
                 }
             default:
                 return null;
+        }
+    }
+
+    private void InitializePromise()
+    {
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+
+        var promiseProto = new JSObject(objectProto, JSClassId.Object);
+
+        const string StateKey = "[[PromiseState]]";
+        const string ResultKey = "[[PromiseResult]]";
+        const string Fulfilled = "fulfilled";
+        const string Rejected = "rejected";
+        const string Pending = "pending";
+        const string FulfillReactionsKey = "[[FulfillReactions]]";
+        const string RejectReactionsKey = "[[RejectReactions]]";
+
+        JSValue PromiseCtor(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length == 0 || !args[0].IsObject || !(args[0].AsObject() is JSFunction executor))
+            {
+                return ThrowTypeError("Promise resolver is not a function");
+            }
+
+            var promise = new JSObject(promiseProto, JSClassId.Object);
+            promise.Set(StateKey, JSValue.FromString(Pending));
+            promise.Set(ResultKey, JSValue.Undefined);
+
+            JSFunction resolveFn = new JSFunction((thisArg, a) =>
+            {
+                if (promise.Get(StateKey).ToString() != Pending)
+                    return JSValue.Undefined;
+                promise.Set(StateKey, JSValue.FromString(Fulfilled));
+                promise.Set(ResultKey, a.Length > 0 ? a[0] : JSValue.Undefined);
+                EnqueueMicrotask(() => RunPromiseReactions(promise, fulfilled: true));
+                return JSValue.Undefined;
+            }, name: "resolve", length: 1, prototype: functionProto);
+
+            JSFunction rejectFn = new JSFunction((thisArg, a) =>
+            {
+                if (promise.Get(StateKey).ToString() != Pending)
+                    return JSValue.Undefined;
+                promise.Set(StateKey, JSValue.FromString(Rejected));
+                promise.Set(ResultKey, a.Length > 0 ? a[0] : JSValue.Undefined);
+                EnqueueMicrotask(() => RunPromiseReactions(promise, fulfilled: false));
+                return JSValue.Undefined;
+            }, name: "reject", length: 1, prototype: functionProto);
+
+            // Executor
+            executor.CallNative(JSValue.Undefined, new[] { JSValue.FromObject(resolveFn), JSValue.FromObject(rejectFn) });
+
+            return JSValue.FromObject(promise);
+        }
+
+        var promiseCtorFn = new JSFunction(PromiseCtor, "Promise", 1, functionProto);
+        promiseCtorFn.Set("prototype", JSValue.FromObject(promiseProto));
+        promiseProto.Set("constructor", JSValue.FromObject(promiseCtorFn));
+
+        // then
+        JSValue PromiseThen(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject)
+                return ThrowTypeError("Promise.then called on non-object");
+            var promise = thisVal.AsObject();
+
+            var onFulfilled = args.Length > 0 && args[0].IsObject ? args[0].AsObject() as JSFunction : null;
+            var onRejected = args.Length > 1 && args[1].IsObject ? args[1].AsObject() as JSFunction : null;
+
+            var nextPromiseVal = PromiseCtor(JSValue.Undefined, new[] { new JSFunction((thisArg, a) => JSValue.Undefined, prototype: functionProto) });
+            var next = nextPromiseVal.AsObject();
+            next.Set(StateKey, JSValue.FromString(Pending));
+            next.Set(ResultKey, JSValue.Undefined);
+
+            void Enqueue(JSObject target, string key, (JSObject promise, JSFunction? onFulfilled, JSFunction? onRejected, JSObject next) reaction)
+            {
+                var listVal = target.Get(key);
+                List<(JSObject, JSFunction?, JSFunction?, JSObject)> list;
+                if (listVal.IsObject && listVal.AsObject().HostData is List<(JSObject, JSFunction?, JSFunction?, JSObject)> hostList)
+                {
+                    list = hostList;
+                }
+                else
+                {
+                    list = new List<(JSObject, JSFunction?, JSFunction?, JSObject)>();
+                    var holder = new JSObject(null, JSClassId.Object) { HostData = list };
+                    target.Set(key, JSValue.FromObject(holder));
+                }
+                list.Add(reaction);
+            }
+
+            var state = promise.Get(StateKey).ToString();
+            if (state == Fulfilled || state == Rejected)
+            {
+                EnqueueMicrotask(() => RunPromiseReaction((promise, onFulfilled, onRejected, next), state == Fulfilled));
+            }
+            else
+            {
+                Enqueue(promise, FulfillReactionsKey, (promise, onFulfilled, onRejected, next));
+                Enqueue(promise, RejectReactionsKey, (promise, onFulfilled, onRejected, next));
+            }
+
+            return nextPromiseVal;
+        }
+
+        JSValue PromiseCatch(JSValue thisVal, JSValue[] args)
+        {
+            return PromiseThen(thisVal, new[] { JSValue.Undefined, args.Length > 0 ? args[0] : JSValue.Undefined });
+        }
+
+        JSValue PromiseFinally(JSValue thisVal, JSValue[] args)
+        {
+            var handler = args.Length > 0 && args[0].IsObject ? args[0].AsObject() as JSFunction : null;
+            JSValue Wrapper(JSValue value, bool isRejection)
+            {
+                if (handler != null)
+                    handler.CallNative(JSValue.Undefined, Array.Empty<JSValue>());
+                return value;
+            }
+            var onFulfilled = new JSFunction((_, a) => Wrapper(a.Length > 0 ? a[0] : JSValue.Undefined, false), "", 1, functionProto);
+            var onRejected = new JSFunction((_, a) => Wrapper(a.Length > 0 ? a[0] : JSValue.Undefined, true), "", 1, functionProto);
+            return PromiseThen(thisVal, new[] { JSValue.FromObject(onFulfilled), JSValue.FromObject(onRejected) });
+        }
+
+        promiseProto.Set("then", JSValue.FromObject(new JSFunction(PromiseThen, "then", 2, functionProto)));
+        promiseProto.Set("catch", JSValue.FromObject(new JSFunction(PromiseCatch, "catch", 1, functionProto)));
+        promiseProto.Set("finally", JSValue.FromObject(new JSFunction(PromiseFinally, "finally", 1, functionProto)));
+
+        // Statics
+        JSValue PromiseResolve(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length > 0 && args[0].IsObject && args[0].AsObject().Prototype == promiseProto)
+                return args[0];
+            var val = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var p = PromiseCtor(JSValue.Undefined, new[] { new JSFunction((_, a) => JSValue.Undefined, prototype: functionProto) }).AsObject();
+            p.Set(StateKey, JSValue.FromString(Fulfilled));
+            p.Set(ResultKey, val);
+            return JSValue.FromObject(p);
+        }
+
+        JSValue PromiseReject(JSValue thisVal, JSValue[] args)
+        {
+            var val = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var p = PromiseCtor(JSValue.Undefined, new[] { new JSFunction((_, a) => JSValue.Undefined, prototype: functionProto) }).AsObject();
+            p.Set(StateKey, JSValue.FromString(Rejected));
+            p.Set(ResultKey, val);
+            return JSValue.FromObject(p);
+        }
+
+        promiseCtorFn.Set("resolve", JSValue.FromObject(new JSFunction(PromiseResolve, "resolve", 1, functionProto)));
+        promiseCtorFn.Set("reject", JSValue.FromObject(new JSFunction(PromiseReject, "reject", 1, functionProto)));
+
+        _globalObject.Set("Promise", JSValue.FromObject(promiseCtorFn));
+
+        void RunPromiseReactions(JSObject promise, bool fulfilled)
+        {
+            var key = fulfilled ? FulfillReactionsKey : RejectReactionsKey;
+            var reactionsVal = promise.Get(key);
+            if (!reactionsVal.IsObject) return;
+            if (reactionsVal.AsObject().HostData is List<(JSObject, JSFunction?, JSFunction?, JSObject)> reactions)
+            {
+                foreach (var reaction in reactions.ToList())
+                {
+                    RunPromiseReaction(reaction, fulfilled);
+                }
+                reactions.Clear();
+            }
+        }
+
+        void RunPromiseReaction((JSObject promise, JSFunction? onFulfilled, JSFunction? onRejected, JSObject next) reaction, bool fulfilled)
+        {
+            var (promise, onFulfilled, onRejected, next) = reaction;
+            var result = promise.Get(ResultKey);
+
+            try
+            {
+                JSValue handlerResult;
+                var handler = fulfilled ? onFulfilled : onRejected;
+                if (handler != null)
+                {
+                    handlerResult = handler.CallNative(JSValue.Undefined, new[] { result });
+                }
+                else
+                {
+                    handlerResult = result;
+                }
+                next.Set(StateKey, JSValue.FromString(Fulfilled));
+                next.Set(ResultKey, handlerResult);
+            }
+            catch (Exception ex)
+            {
+                next.Set(StateKey, JSValue.FromString(Rejected));
+                next.Set(ResultKey, JSValue.FromString(ex.Message));
+            }
         }
     }
 
