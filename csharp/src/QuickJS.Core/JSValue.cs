@@ -180,6 +180,23 @@ public readonly struct JSValue : IEquatable<JSValue>
         return new JSValue(JSValueType.String, value);
     }
 
+    /// <summary>
+    /// Creates a JavaScript object value.
+    /// </summary>
+    /// <param name="obj">The JSObject instance.</param>
+    /// <returns>A JSValue representing the object.</returns>
+    /// <exception cref="ArgumentNullException">Thrown if <paramref name="obj"/> is null.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static JSValue FromObject(JSObject obj)
+    {
+        if (obj is null)
+        {
+            ThrowArgumentNull(nameof(obj));
+        }
+
+        return new JSValue(JSValueType.Object, obj);
+    }
+
     #endregion
 
     #region Type Properties
@@ -437,6 +454,38 @@ public readonly struct JSValue : IEquatable<JSValue>
 
         result = null;
         return false;
+    }
+
+    /// <summary>
+    /// Attempts to get this value as a JSObject.
+    /// </summary>
+    /// <param name="result">The JSObject if this is an object.</param>
+    /// <returns><c>true</c> if this value is an object; otherwise, <c>false</c>.</returns>
+    public bool TryGetObject([NotNullWhen(true)] out JSObject? result)
+    {
+        if (_tag == JSValueType.Object && _objectValue is JSObject obj)
+        {
+            result = obj;
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Gets this value as a JSObject.
+    /// </summary>
+    /// <returns>The JSObject.</returns>
+    /// <exception cref="InvalidOperationException">Thrown if this value is not an object.</exception>
+    public JSObject AsObject()
+    {
+        if (TryGetObject(out var result))
+        {
+            return result;
+        }
+
+        throw new InvalidOperationException($"Cannot convert {_tag} to Object.");
     }
 
     /// <summary>

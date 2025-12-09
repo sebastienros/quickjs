@@ -1,0 +1,812 @@
+// Licensed under the MIT License.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+
+namespace QuickJS;
+
+/// <summary>
+/// Represents a JavaScript object with named and indexed properties, a prototype chain,
+/// and extensibility control.
+/// </summary>
+/// <remarks>
+/// <para>
+/// This class mirrors QuickJS's <c>struct JSObject</c> with the following key components:
+/// </para>
+/// <list type="bullet">
+/// <item><description>A class ID (<see cref="JSClassId"/>) identifying the object type</description></item>
+/// <item><description>A prototype reference for prototype chain lookups</description></item>
+/// <item><description>Named property storage via a dictionary of <see cref="PropertyDescriptor"/></description></item>
+/// <item><description>Indexed property storage for array-like objects</description></item>
+/// <item><description>Extensibility flag controlling whether new properties can be added</description></item>
+/// </list>
+/// <para>
+/// In QuickJS, objects use a "shape" system (hidden classes) for optimized property access.
+/// This C# implementation uses a simpler dictionary-based approach for clarity, while
+/// maintaining the same semantics. A shape-based optimization could be added later.
+/// </para>
+/// <para>
+/// The property access methods follow the ECMAScript specification algorithms:
+/// [[Get]], [[Set]], [[Delete]], [[HasProperty]], [[DefineOwnProperty]], etc.
+/// </para>
+/// </remarks>
+[DebuggerDisplay("{DebuggerDisplay,nq}")]
+public class JSObject
+{
+    #region Fields
+
+    // Named properties storage. Key is property name (string or atom).
+    private readonly Dictionary<string, PropertyDescriptor> _properties;
+
+    // Indexed (numeric) properties for array-like objects.
+    private Dictionary<uint, PropertyDescriptor>? _indexedProperties;
+
+    // Prototype chain reference. Null means no prototype (like Object.create(null)).
+    private JSObject? _prototype;
+
+    // The class ID determines special behavior (Array, Function, etc.)
+    private readonly JSClassId _classId;
+
+    // Extensibility flag - if false, no new properties can be added.
+    private bool _extensible;
+
+    // Optional internal data for primitive wrappers and special objects
+    private JSValue _internalValue;
+
+    #endregion
+
+    #region Constructors
+
+    /// <summary>
+    /// Creates a new JavaScript object with the specified prototype and class ID.
+    /// </summary>
+    /// <param name="prototype">The prototype object, or null for no prototype.</param>
+    /// <param name="classId">The class ID for this object. Defaults to <see cref="JSClassId.Object"/>.</param>
+    public JSObject(JSObject? prototype = null, JSClassId classId = JSClassId.Object)
+    {
+        _prototype = prototype;
+        _classId = classId;
+        _extensible = true;
+        _properties = new Dictionary<string, PropertyDescriptor>();
+        _internalValue = JSValue.Undefined;
+    }
+
+    #endregion
+
+    #region Properties
+
+    /// <summary>
+    /// Gets the class ID for this object.
+    /// </summary>
+    public JSClassId ClassId => _classId;
+
+    /// <summary>
+    /// Gets or sets the prototype of this object.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown if trying to set the prototype when the object has an immutable prototype.
+    /// </exception>
+    public JSObject? Prototype
+    {
+        get => _prototype;
+        set
+        {
+            // TODO: Add immutable prototype check for special objects
+            _prototype = value;
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether this object is extensible
+    /// (can have new properties added).
+    /// </summary>
+    public bool IsExtensible => _extensible;
+
+    /// <summary>
+    /// Gets the number of own properties (not including prototype properties).
+    /// </summary>
+    public int OwnPropertyCount => _properties.Count + (_indexedProperties?.Count ?? 0);
+
+    /// <summary>
+    /// Gets or sets the internal value for primitive wrapper objects.
+    /// </summary>
+    /// <remarks>
+    /// This is used for Number, String, Boolean, Symbol, and BigInt wrapper objects
+    /// to store their primitive value.
+    /// </remarks>
+    internal JSValue InternalValue
+    {
+        get => _internalValue;
+        set => _internalValue = value;
+    }
+
+    #endregion
+
+    #region Property Access - Get
+
+    /// <summary>
+    /// Gets the value of a named property, following the prototype chain.
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    /// <returns>The property value, or <see cref="JSValue.Undefined"/> if not found.</returns>
+    public JSValue Get(string propertyName)
+    {
+        if (propertyName == null)
+        {
+            throw new ArgumentNullException(nameof(propertyName));
+        }
+
+        // Look up in own properties first
+        if (_properties.TryGetValue(propertyName, out var descriptor))
+        {
+            return GetValueFromDescriptor(descriptor);
+        }
+
+        // Walk the prototype chain
+        var proto = _prototype;
+        while (proto != null)
+        {
+            if (proto._properties.TryGetValue(propertyName, out descriptor))
+            {
+                return proto.GetValueFromDescriptor(descriptor);
+            }
+            proto = proto._prototype;
+        }
+
+        return JSValue.Undefined;
+    }
+
+    /// <summary>
+    /// Gets the value of an indexed property.
+    /// </summary>
+    /// <param name="index">The property index.</param>
+    /// <returns>The property value, or <see cref="JSValue.Undefined"/> if not found.</returns>
+    public JSValue Get(uint index)
+    {
+        // Look up in own indexed properties first
+        if (_indexedProperties != null && _indexedProperties.TryGetValue(index, out var descriptor))
+        {
+            return GetValueFromDescriptor(descriptor);
+        }
+
+        // Walk the prototype chain
+        var proto = _prototype;
+        while (proto != null)
+        {
+            if (proto._indexedProperties != null && proto._indexedProperties.TryGetValue(index, out descriptor))
+            {
+                return proto.GetValueFromDescriptor(descriptor);
+            }
+            proto = proto._prototype;
+        }
+
+        return JSValue.Undefined;
+    }
+
+    /// <summary>
+    /// Gets the value from a property descriptor.
+    /// </summary>
+    private JSValue GetValueFromDescriptor(PropertyDescriptor descriptor)
+    {
+        if (descriptor.IsDataDescriptor)
+        {
+            return descriptor.Value;
+        }
+
+        // Accessor descriptor - need to call getter
+        // For now, return undefined if no getter or not callable
+        if (descriptor.Getter.IsUndefined)
+        {
+            return JSValue.Undefined;
+        }
+
+        // TODO: Actually call the getter function when we have a runtime context
+        // For now, just return undefined
+        return JSValue.Undefined;
+    }
+
+    #endregion
+
+    #region Property Access - Set
+
+    /// <summary>
+    /// Sets the value of a named property.
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    /// <param name="value">The value to set.</param>
+    /// <returns>True if the property was set successfully, false otherwise.</returns>
+    public bool Set(string propertyName, JSValue value)
+    {
+        if (propertyName == null)
+        {
+            throw new ArgumentNullException(nameof(propertyName));
+        }
+
+        // Check if we have an own property
+        if (_properties.TryGetValue(propertyName, out var descriptor))
+        {
+            return SetWithDescriptor(descriptor, value);
+        }
+
+        // Check prototype chain for accessor or non-writable data property
+        var proto = _prototype;
+        while (proto != null)
+        {
+            if (proto._properties.TryGetValue(propertyName, out var protoDesc))
+            {
+                if (protoDesc.IsAccessorDescriptor)
+                {
+                    // Accessor found in prototype - call setter on this object
+                    if (protoDesc.Setter.IsUndefined)
+                    {
+                        return false; // No setter
+                    }
+                    // TODO: Call setter
+                    return false;
+                }
+
+                if (!protoDesc.IsWritable)
+                {
+                    return false; // Non-writable data property in prototype
+                }
+
+                break; // Writable data property - create own property
+            }
+            proto = proto._prototype;
+        }
+
+        // Create new own property if extensible
+        if (!_extensible)
+        {
+            return false;
+        }
+
+        _properties[propertyName] = PropertyDescriptor.Data(value);
+        return true;
+    }
+
+    /// <summary>
+    /// Sets the value of an indexed property.
+    /// </summary>
+    /// <param name="index">The property index.</param>
+    /// <param name="value">The value to set.</param>
+    /// <returns>True if the property was set successfully, false otherwise.</returns>
+    public bool Set(uint index, JSValue value)
+    {
+        // Check if we have an own indexed property
+        if (_indexedProperties != null && _indexedProperties.TryGetValue(index, out var descriptor))
+        {
+            return SetWithDescriptor(descriptor, value);
+        }
+
+        // Create new own indexed property if extensible
+        if (!_extensible)
+        {
+            return false;
+        }
+
+        _indexedProperties ??= new Dictionary<uint, PropertyDescriptor>();
+        _indexedProperties[index] = PropertyDescriptor.Data(value);
+        return true;
+    }
+
+    /// <summary>
+    /// Sets value through an existing descriptor.
+    /// </summary>
+    private bool SetWithDescriptor(PropertyDescriptor descriptor, JSValue value)
+    {
+        if (descriptor.IsDataDescriptor)
+        {
+            if (!descriptor.IsWritable)
+            {
+                return false;
+            }
+            descriptor.Value = value;
+            return true;
+        }
+
+        // Accessor descriptor
+        if (descriptor.Setter.IsUndefined)
+        {
+            return false;
+        }
+
+        // TODO: Call setter
+        return false;
+    }
+
+    #endregion
+
+    #region Property Access - Has
+
+    /// <summary>
+    /// Checks if the object has a named property (own or inherited).
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    /// <returns>True if the property exists, false otherwise.</returns>
+    public bool HasProperty(string propertyName)
+    {
+        if (propertyName == null)
+        {
+            throw new ArgumentNullException(nameof(propertyName));
+        }
+
+        if (_properties.ContainsKey(propertyName))
+        {
+            return true;
+        }
+
+        var proto = _prototype;
+        while (proto != null)
+        {
+            if (proto._properties.ContainsKey(propertyName))
+            {
+                return true;
+            }
+            proto = proto._prototype;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if the object has an indexed property (own or inherited).
+    /// </summary>
+    /// <param name="index">The property index.</param>
+    /// <returns>True if the property exists, false otherwise.</returns>
+    public bool HasProperty(uint index)
+    {
+        if (_indexedProperties != null && _indexedProperties.ContainsKey(index))
+        {
+            return true;
+        }
+
+        var proto = _prototype;
+        while (proto != null)
+        {
+            if (proto._indexedProperties != null && proto._indexedProperties.ContainsKey(index))
+            {
+                return true;
+            }
+            proto = proto._prototype;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if the object has an own named property (not inherited).
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    /// <returns>True if the object has an own property with this name, false otherwise.</returns>
+    public bool HasOwnProperty(string propertyName)
+    {
+        if (propertyName == null)
+        {
+            throw new ArgumentNullException(nameof(propertyName));
+        }
+
+        return _properties.ContainsKey(propertyName);
+    }
+
+    /// <summary>
+    /// Checks if the object has an own indexed property (not inherited).
+    /// </summary>
+    /// <param name="index">The property index.</param>
+    /// <returns>True if the object has an own property at this index, false otherwise.</returns>
+    public bool HasOwnProperty(uint index)
+    {
+        return _indexedProperties != null && _indexedProperties.ContainsKey(index);
+    }
+
+    #endregion
+
+    #region Property Access - Delete
+
+    /// <summary>
+    /// Deletes a named property from the object.
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    /// <returns>True if the property was deleted or didn't exist, false if non-configurable.</returns>
+    public bool Delete(string propertyName)
+    {
+        if (propertyName == null)
+        {
+            throw new ArgumentNullException(nameof(propertyName));
+        }
+
+        if (!_properties.TryGetValue(propertyName, out var descriptor))
+        {
+            return true; // Property doesn't exist
+        }
+
+        if (!descriptor.IsConfigurable)
+        {
+            return false; // Cannot delete non-configurable property
+        }
+
+        return _properties.Remove(propertyName);
+    }
+
+    /// <summary>
+    /// Deletes an indexed property from the object.
+    /// </summary>
+    /// <param name="index">The property index.</param>
+    /// <returns>True if the property was deleted or didn't exist, false if non-configurable.</returns>
+    public bool Delete(uint index)
+    {
+        if (_indexedProperties == null || !_indexedProperties.TryGetValue(index, out var descriptor))
+        {
+            return true; // Property doesn't exist
+        }
+
+        if (!descriptor.IsConfigurable)
+        {
+            return false; // Cannot delete non-configurable property
+        }
+
+        return _indexedProperties.Remove(index);
+    }
+
+    #endregion
+
+    #region Property Definition
+
+    /// <summary>
+    /// Defines a named property with a descriptor.
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    /// <param name="descriptor">The property descriptor.</param>
+    /// <returns>True if the property was defined successfully, false otherwise.</returns>
+    /// <remarks>
+    /// This implements the [[DefineOwnProperty]] internal method from the ECMAScript spec.
+    /// </remarks>
+    public bool DefineProperty(string propertyName, PropertyDescriptor descriptor)
+    {
+        if (propertyName == null)
+        {
+            throw new ArgumentNullException(nameof(propertyName));
+        }
+
+        if (descriptor == null)
+        {
+            throw new ArgumentNullException(nameof(descriptor));
+        }
+
+        // Check if property already exists
+        if (_properties.TryGetValue(propertyName, out var existing))
+        {
+            return RedefineProperty(existing, descriptor, propertyName, isIndexed: false);
+        }
+
+        // New property - check extensibility
+        if (!_extensible)
+        {
+            return false;
+        }
+
+        _properties[propertyName] = descriptor.Clone();
+        return true;
+    }
+
+    /// <summary>
+    /// Defines an indexed property with a descriptor.
+    /// </summary>
+    /// <param name="index">The property index.</param>
+    /// <param name="descriptor">The property descriptor.</param>
+    /// <returns>True if the property was defined successfully, false otherwise.</returns>
+    public bool DefineProperty(uint index, PropertyDescriptor descriptor)
+    {
+        if (descriptor == null)
+        {
+            throw new ArgumentNullException(nameof(descriptor));
+        }
+
+        // Check if property already exists
+        if (_indexedProperties != null && _indexedProperties.TryGetValue(index, out var existing))
+        {
+            return RedefineProperty(existing, descriptor, index.ToString(), isIndexed: true, index);
+        }
+
+        // New property - check extensibility
+        if (!_extensible)
+        {
+            return false;
+        }
+
+        _indexedProperties ??= new Dictionary<uint, PropertyDescriptor>();
+        _indexedProperties[index] = descriptor.Clone();
+        return true;
+    }
+
+    /// <summary>
+    /// Attempts to redefine an existing property according to ECMAScript rules.
+    /// </summary>
+    private bool RedefineProperty(PropertyDescriptor existing, PropertyDescriptor newDesc,
+        string propertyName, bool isIndexed, uint index = 0)
+    {
+        // If the existing property is not configurable, there are restrictions
+        if (!existing.IsConfigurable)
+        {
+            // Cannot change to accessor if data (or vice versa)
+            if (existing.IsDataDescriptor != newDesc.IsDataDescriptor)
+            {
+                return false;
+            }
+
+            // Cannot change enumerable if not configurable
+            if (existing.IsEnumerable != newDesc.IsEnumerable)
+            {
+                return false;
+            }
+
+            if (existing.IsDataDescriptor)
+            {
+                // Cannot change writable from false to true
+                if (!existing.IsWritable && newDesc.IsWritable)
+                {
+                    return false;
+                }
+
+                // Cannot change value if not writable
+                if (!existing.IsWritable && !existing.Value.Equals(newDesc.Value))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                // Cannot change getter or setter if not configurable
+                // (simplified check - full spec is more complex)
+                return false;
+            }
+        }
+
+        // Apply the new descriptor
+        var cloned = newDesc.Clone();
+        if (isIndexed)
+        {
+            _indexedProperties![index] = cloned;
+        }
+        else
+        {
+            _properties[propertyName] = cloned;
+        }
+
+        return true;
+    }
+
+    #endregion
+
+    #region Property Descriptor Access
+
+    /// <summary>
+    /// Gets the own property descriptor for a named property.
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    /// <returns>The property descriptor, or null if the property doesn't exist.</returns>
+    public PropertyDescriptor? GetOwnPropertyDescriptor(string propertyName)
+    {
+        if (propertyName == null)
+        {
+            throw new ArgumentNullException(nameof(propertyName));
+        }
+
+        if (_properties.TryGetValue(propertyName, out var descriptor))
+        {
+            return descriptor.Clone();
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Gets the own property descriptor for an indexed property.
+    /// </summary>
+    /// <param name="index">The property index.</param>
+    /// <returns>The property descriptor, or null if the property doesn't exist.</returns>
+    public PropertyDescriptor? GetOwnPropertyDescriptor(uint index)
+    {
+        if (_indexedProperties != null && _indexedProperties.TryGetValue(index, out var descriptor))
+        {
+            return descriptor.Clone();
+        }
+
+        return null;
+    }
+
+    #endregion
+
+    #region Property Enumeration
+
+    /// <summary>
+    /// Gets the names of all own enumerable properties.
+    /// </summary>
+    /// <returns>An enumerable of property names.</returns>
+    public IEnumerable<string> GetOwnEnumerablePropertyNames()
+    {
+        foreach (var kvp in _properties)
+        {
+            if (kvp.Value.IsEnumerable)
+            {
+                yield return kvp.Key;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the names of all own properties (enumerable and non-enumerable).
+    /// </summary>
+    /// <returns>An enumerable of property names.</returns>
+    public IEnumerable<string> GetOwnPropertyNames()
+    {
+        foreach (var kvp in _properties)
+        {
+            yield return kvp.Key;
+        }
+    }
+
+    /// <summary>
+    /// Gets the indices of all own indexed properties.
+    /// </summary>
+    /// <returns>An enumerable of property indices.</returns>
+    public IEnumerable<uint> GetOwnPropertyIndices()
+    {
+        if (_indexedProperties != null)
+        {
+            foreach (var index in _indexedProperties.Keys)
+            {
+                yield return index;
+            }
+        }
+    }
+
+    #endregion
+
+    #region Extensibility Control
+
+    /// <summary>
+    /// Prevents any new properties from being added to the object.
+    /// Existing properties can still be modified or deleted (if configurable).
+    /// </summary>
+    /// <returns>True if the operation succeeded.</returns>
+    public bool PreventExtensions()
+    {
+        _extensible = false;
+        return true;
+    }
+
+    /// <summary>
+    /// Seals the object: prevents new properties and makes all existing properties non-configurable.
+    /// Existing writable properties can still be modified.
+    /// </summary>
+    /// <returns>True if the operation succeeded.</returns>
+    public bool Seal()
+    {
+        _extensible = false;
+
+        foreach (var kvp in _properties)
+        {
+            kvp.Value.SetConfigurable(false);
+        }
+
+        if (_indexedProperties != null)
+        {
+            foreach (var kvp in _indexedProperties)
+            {
+                kvp.Value.SetConfigurable(false);
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Freezes the object: prevents new properties, makes all existing properties
+    /// non-configurable, and makes all data properties non-writable.
+    /// </summary>
+    /// <returns>True if the operation succeeded.</returns>
+    public bool Freeze()
+    {
+        _extensible = false;
+
+        foreach (var kvp in _properties)
+        {
+            kvp.Value.SetConfigurable(false);
+            if (kvp.Value.IsDataDescriptor)
+            {
+                kvp.Value.SetWritable(false);
+            }
+        }
+
+        if (_indexedProperties != null)
+        {
+            foreach (var kvp in _indexedProperties)
+            {
+                kvp.Value.SetConfigurable(false);
+                if (kvp.Value.IsDataDescriptor)
+                {
+                    kvp.Value.SetWritable(false);
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Checks if the object is sealed (not extensible and all properties non-configurable).
+    /// </summary>
+    public bool IsSealed
+    {
+        get
+        {
+            if (_extensible) return false;
+
+            foreach (var kvp in _properties)
+            {
+                if (kvp.Value.IsConfigurable) return false;
+            }
+
+            if (_indexedProperties != null)
+            {
+                foreach (var kvp in _indexedProperties)
+                {
+                    if (kvp.Value.IsConfigurable) return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Checks if the object is frozen (sealed and all data properties non-writable).
+    /// </summary>
+    public bool IsFrozen
+    {
+        get
+        {
+            if (_extensible) return false;
+
+            foreach (var kvp in _properties)
+            {
+                if (kvp.Value.IsConfigurable) return false;
+                if (kvp.Value.IsDataDescriptor && kvp.Value.IsWritable) return false;
+            }
+
+            if (_indexedProperties != null)
+            {
+                foreach (var kvp in _indexedProperties)
+                {
+                    if (kvp.Value.IsConfigurable) return false;
+                    if (kvp.Value.IsDataDescriptor && kvp.Value.IsWritable) return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
+    #endregion
+
+    #region Debug Support
+
+    private string DebuggerDisplay
+    {
+        get
+        {
+            var typeName = _classId.ToString();
+            return $"[{typeName}] {OwnPropertyCount} properties";
+        }
+    }
+
+    /// <inheritdoc/>
+    public override string ToString()
+    {
+        return $"[object {_classId}]";
+    }
+
+    #endregion
+}

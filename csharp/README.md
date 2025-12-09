@@ -50,12 +50,12 @@ Use `#if` directives when needed:
 | Phase 2: Lexer | ✅ Complete | 2/2 | ~100 |
 | Phase 3: Bytecode | ✅ Complete | 5/5 | ~120 |
 | Phase 4: Parser | ✅ Complete | 8/8 | ~2000 |
-| Phase 5: Runtime Objects | ⏳ Planned | 0/4 | - |
+| Phase 5: Runtime Objects | 🔄 In Progress | 1/4 | ~280 |
 | Phase 6: VM & Interpreter | ⏳ Planned | 0/7 | - |
 
-**Total Tests: 2276** (all passing, 0 skipped)
+**Total Tests: 2554** (all passing, 0 skipped)
 
-**Latest Commit**: `step-4.8-parser-errors`
+**Latest Commit**: `step-5.1-jsobject`
 
 # Detailed Implementation Plan
 
@@ -406,19 +406,19 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ## Phase 5: Runtime Objects
 
-- [ ] Implement `Scope` class
-- [ ] Build scope tree from AST
-### Step 5.1: JSObject Implementation
+### Step 5.1: JSObject Implementation ✅
 **Commit**: `step-5.1-jsobject`  
 **Doc**: `docs/21-jsobject.md`
 
-- [ ] Implement `JSObject` class
-- [ ] Implement property storage (indexed and named)
-- [ ] Implement property descriptors
-- [ ] Implement extensibility control
-- [ ] Write object tests
+- [x] Implement `PropertyDescriptor` class with PropertyFlags
+- [x] Implement `JSClassId` enum with built-in class IDs
+- [x] Implement `JSObject` class with property storage
+- [x] Implement prototype chain lookup
+- [x] Implement extensibility control (PreventExtensions, Seal, Freeze)
+- [x] Add `JSValue.FromObject`, `TryGetObject`, `AsObject`
+- [x] Write comprehensive object tests
 
-**Learning Goals**: JavaScript object model, property descriptors
+**Learning Goals**: JavaScript object model, property descriptors, prototype chain
 
 ---
 
@@ -426,10 +426,10 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 **Commit**: `step-5.2-prototypes`  
 **Doc**: `docs/22-prototype-chain.md`
 
-- [ ] Implement prototype chain lookup
 - [ ] Implement Object.getPrototypeOf / setPrototypeOf
 - [ ] Implement Object.create
 - [ ] Handle null prototype case
+- [ ] Implement immutable prototype flag
 - [ ] Write prototype tests
 
 **Learning Goals**: Prototype-based inheritance
