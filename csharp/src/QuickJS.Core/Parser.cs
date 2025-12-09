@@ -1774,41 +1774,560 @@ public sealed class Parser
 
     /// <summary>
     /// Parses a function declaration: function name(params) { body }
+    /// Also handles generators (function*) and async functions.
     /// </summary>
     public void ParseFunctionDeclaration()
     {
-        Expect(TokenType.Function);
+        ParseFunction(JSParseFunctionType.Statement, JSFunctionKind.Normal, JSAtom.Empty);
+    }
 
-        if (!Check(TokenType.Identifier))
+    /// <summary>
+    /// Parses a function expression: function(params) { body } or function name(params) { body }
+    /// </summary>
+    public void ParseFunctionExpression()
+    {
+        ParseFunction(JSParseFunctionType.Expression, JSFunctionKind.Normal, JSAtom.Empty);
+    }
+
+    /// <summary>
+    /// Parses a function with the specified type and kind.
+    /// This is the main function parsing entry point.
+    /// </summary>
+    /// <param name="funcType">The type of function (declaration, expression, arrow, etc.)</param>
+    /// <param name="funcKind">The kind of function (normal, generator, async)</param>
+    /// <param name="funcName">The function name (or null for anonymous)</param>
+    public void ParseFunction(JSParseFunctionType funcType, JSFunctionKind funcKind, JSAtom funcName)
+    {
+        bool isExpression = funcType != JSParseFunctionType.Statement;
+
+        // For statement/expression/var functions, consume 'function' keyword
+        if (funcType == JSParseFunctionType.Statement ||
+            funcType == JSParseFunctionType.Expression)
+        {
+            // Check for 'async' keyword before 'function'
+            if (Check(TokenType.Async) && !_currentToken.HasLineTerminatorBefore)
+            {
+                NextToken();
+                funcKind = JSFunctionKind.Async;
+            }
+
+            Expect(TokenType.Function);
+
+            // Check for generator (function*)
+            if (Match(TokenType.Asterisk))
+            {
+                funcKind |= JSFunctionKind.Generator;
+            }
+
+            // Parse function name
+            if (Check(TokenType.Identifier))
+            {
+                var name = (string)_currentToken.Value!;
+                funcName = _atoms.GetOrCreateAtom(name);
+                NextToken();
+            }
+            else if (funcType == JSParseFunctionType.Statement)
+            {
+                throw new JSSyntaxError(
+                    "Function name expected",
+                    _currentToken.Start);
+            }
+        }
+        else if (funcType != JSParseFunctionType.Arrow)
+        {
+            // For method, getter, setter - name is already parsed
+        }
+
+        // Save the parent function and create a new function definition
+        var parentFunction = _currentFunction;
+        var newFunction = new JSFunctionDef(funcName);
+        newFunction.Filename = parentFunction.Filename;
+        newFunction.Parent = parentFunction;
+        newFunction.FuncKind = funcKind;
+        newFunction.FuncType = funcType;
+
+        // Set function properties based on type
+        ConfigureFunctionByType(newFunction, funcType, funcKind);
+
+        // Switch to the new function's context
+        _currentFunction = newFunction;
+
+        // Parse parameters
+        if (funcType == JSParseFunctionType.Arrow && Check(TokenType.Identifier))
+        {
+            // Arrow function with single unparenthesized parameter: x => expr
+            var paramName = (string)_currentToken.Value!;
+            var paramAtom = _atoms.GetOrCreateAtom(paramName);
+            _currentFunction.AddArg(paramAtom);
+            _currentFunction.DefinedArgCount = 1;
+            NextToken();
+        }
+        else if (funcType != JSParseFunctionType.ClassStaticInit)
+        {
+            // Parse parenthesized parameters
+            ParseFunctionParameters(funcType);
+        }
+
+        // For generators, emit initial yield
+        if ((funcKind & JSFunctionKind.Generator) != 0)
+        {
+            EmitOp(OpCode.InitialYield);
+        }
+
+        // Mark that we're in the function body
+        _currentFunction.PushScope(); // Body scope
+
+        // Parse function body
+        if (funcType == JSParseFunctionType.Arrow)
+        {
+            Expect(TokenType.Arrow);
+
+            if (Check(TokenType.LeftBrace))
+            {
+                // Arrow function with block body: () => { statements }
+                ParseFunctionBody();
+            }
+            else
+            {
+                // Arrow function with expression body: () => expr
+                ParseAssignExpression();
+
+                if ((funcKind & JSFunctionKind.Async) != 0)
+                {
+                    EmitOp(OpCode.ReturnAsync);
+                }
+                else
+                {
+                    EmitOp(OpCode.Return);
+                }
+            }
+        }
+        else
+        {
+            ParseFunctionBody();
+        }
+
+        _currentFunction.PopScope();
+
+        // Add implicit return undefined if needed
+        if (!EndsWithReturn())
+        {
+            EmitOp(OpCode.Undefined);
+            EmitOp(OpCode.Return);
+        }
+
+        // Add the function to the parent's child functions
+        int funcIdx = parentFunction.AddChildFunction(newFunction);
+
+        // Switch back to the parent function
+        _currentFunction = parentFunction;
+
+        // Emit code to create the function object (closure)
+        EmitOp(OpCode.FClosure);
+        EmitU16((ushort)funcIdx);
+
+        // For function declarations, store in the variable
+        if (funcType == JSParseFunctionType.Statement && !funcName.IsEmpty)
+        {
+            EmitOp(OpCode.ScopePutVar);
+            EmitAtom(funcName);
+            EmitU16((ushort)_currentFunction.ScopeLevel);
+        }
+    }
+
+    /// <summary>
+    /// Configures function properties based on its type.
+    /// </summary>
+    private void ConfigureFunctionByType(JSFunctionDef func, JSParseFunctionType funcType, JSFunctionKind funcKind)
+    {
+        // Set up binding properties
+        func.HasArgumentsBinding = funcType != JSParseFunctionType.Arrow &&
+                                   funcType != JSParseFunctionType.ClassStaticInit;
+        func.HasThisBinding = func.HasArgumentsBinding;
+
+        // Set up prototype property
+        func.HasPrototype = (funcType == JSParseFunctionType.Statement ||
+                             funcType == JSParseFunctionType.Expression) &&
+                            funcKind == JSFunctionKind.Normal;
+
+        // Set up home object (for super access)
+        func.HasHomeObject = funcType == JSParseFunctionType.Method ||
+                             funcType == JSParseFunctionType.Getter ||
+                             funcType == JSParseFunctionType.Setter ||
+                             funcType == JSParseFunctionType.ClassConstructor ||
+                             funcType == JSParseFunctionType.DerivedClassConstructor;
+
+        // Configure new.target, super access based on type
+        if (funcType == JSParseFunctionType.Arrow && func.Parent != null)
+        {
+            // Arrow functions inherit from parent
+            func.NewTargetAllowed = func.Parent.NewTargetAllowed;
+            func.SuperCallAllowed = func.Parent.SuperCallAllowed;
+            func.SuperAllowed = func.Parent.SuperAllowed;
+            func.ArgumentsAllowed = func.Parent.ArgumentsAllowed;
+        }
+        else if (funcType == JSParseFunctionType.ClassStaticInit)
+        {
+            func.NewTargetAllowed = true;
+            func.SuperCallAllowed = false;
+            func.SuperAllowed = true;
+            func.ArgumentsAllowed = false;
+        }
+        else
+        {
+            func.NewTargetAllowed = true;
+            func.SuperCallAllowed = funcType == JSParseFunctionType.DerivedClassConstructor;
+            func.SuperAllowed = func.HasHomeObject;
+            func.ArgumentsAllowed = true;
+        }
+
+        func.IsDerivedClassConstructor = funcType == JSParseFunctionType.DerivedClassConstructor;
+    }
+
+    /// <summary>
+    /// Parses function parameters: (param1, param2 = default, ...rest)
+    /// </summary>
+    private void ParseFunctionParameters(JSParseFunctionType funcType)
+    {
+        Expect(TokenType.LeftParen);
+
+        bool hasOptionalArg = false;
+        bool hasSimpleParameterList = true;
+        bool hasParameterExpressions = false;
+
+        while (!Check(TokenType.RightParen))
+        {
+            bool isRest = false;
+
+            // Check for rest parameter
+            if (Match(TokenType.Ellipsis))
+            {
+                if (funcType == JSParseFunctionType.Setter)
+                {
+                    throw new JSSyntaxError(
+                        "Setter cannot have rest parameter",
+                        _currentToken.Start);
+                }
+                isRest = true;
+                hasSimpleParameterList = false;
+            }
+
+            // Check for destructuring pattern
+            if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+            {
+                hasSimpleParameterList = false;
+
+                // Add unnamed arg for destructuring
+                int idx = _currentFunction.AddArg(JSAtom.Empty);
+
+                if (isRest)
+                {
+                    EmitOp(OpCode.Rest);
+                    EmitU16((ushort)idx);
+                }
+                else
+                {
+                    EmitOp(OpCode.GetArg);
+                    EmitU16((ushort)idx);
+                }
+
+                // Parse destructuring pattern
+                ParseDestructuringPattern(isDeclaration: true, hasDefaultAllowed: true);
+
+                if (!hasOptionalArg)
+                {
+                    _currentFunction.DefinedArgCount++;
+                }
+            }
+            else if (Check(TokenType.Identifier))
+            {
+                // Simple parameter
+                var paramName = (string)_currentToken.Value!;
+                var paramAtom = _atoms.GetOrCreateAtom(paramName);
+                NextToken();
+
+                int idx = _currentFunction.AddArg(paramAtom);
+
+                if (isRest)
+                {
+                    // Rest parameter: ...name
+                    EmitOp(OpCode.Rest);
+                    EmitU16((ushort)idx);
+                    EmitOp(OpCode.PutArg);
+                    EmitU16((ushort)idx);
+                    hasSimpleParameterList = false;
+                    hasOptionalArg = true;
+                }
+                else if (Check(TokenType.Assign))
+                {
+                    // Default parameter: name = expr
+                    NextToken();
+                    hasSimpleParameterList = false;
+                    hasParameterExpressions = true;
+                    hasOptionalArg = true;
+
+                    // Generate code: if (arg === undefined) arg = default;
+                    int label = NewLabel();
+                    EmitOp(OpCode.GetArg);
+                    EmitU16((ushort)idx);
+                    EmitOp(OpCode.Dup);
+                    EmitOp(OpCode.Undefined);
+                    EmitOp(OpCode.StrictEq);
+                    EmitGoto(OpCode.IfFalse, label);
+                    EmitOp(OpCode.Drop);
+                    ParseAssignExpression();
+                    EmitOp(OpCode.Dup);
+                    EmitOp(OpCode.PutArg);
+                    EmitU16((ushort)idx);
+                    EmitLabel(label);
+                    EmitOp(OpCode.ScopePutVarInit);
+                    EmitAtom(paramAtom);
+                    EmitU16((ushort)_currentFunction.ScopeLevel);
+                }
+                else
+                {
+                    if (!hasOptionalArg)
+                    {
+                        _currentFunction.DefinedArgCount++;
+                    }
+                }
+            }
+            else
+            {
+                throw new JSSyntaxError(
+                    $"Expected parameter name, got {_currentToken.Type}",
+                    _currentToken.Start);
+            }
+
+            // Rest parameter must be last
+            if (isRest && !Check(TokenType.RightParen))
+            {
+                throw new JSSyntaxError(
+                    "Rest parameter must be last",
+                    _currentToken.Start);
+            }
+
+            if (!Match(TokenType.Comma))
+            {
+                break;
+            }
+        }
+
+        Expect(TokenType.RightParen);
+
+        // Validate getter/setter parameter count
+        if (funcType == JSParseFunctionType.Getter && _currentFunction.ArgCount != 0)
         {
             throw new JSSyntaxError(
-                "Expected function name",
+                "Getter must have no parameters",
+                _currentToken.Start);
+        }
+        if (funcType == JSParseFunctionType.Setter && _currentFunction.ArgCount != 1)
+        {
+            throw new JSSyntaxError(
+                "Setter must have exactly one parameter",
                 _currentToken.Start);
         }
 
-        var name = (string)_currentToken.Value!;
-        var atom = _atoms.GetOrCreateAtom(name);
-        NextToken();
+        _currentFunction.HasSimpleParameterList = hasSimpleParameterList;
+        _currentFunction.HasParameterExpressions = hasParameterExpressions;
+    }
 
-        // TODO: Full function parsing with new JSFunctionDef
-        // For now, skip to the closing brace
-        Expect(TokenType.LeftParen);
-        int parenDepth = 1;
-        while (parenDepth > 0 && !Check(TokenType.EOF))
+    /// <summary>
+    /// Parses a destructuring pattern for parameters or assignments.
+    /// </summary>
+    private void ParseDestructuringPattern(bool isDeclaration, bool hasDefaultAllowed)
+    {
+        if (Check(TokenType.LeftBracket))
         {
-            if (Check(TokenType.LeftParen)) parenDepth++;
-            else if (Check(TokenType.RightParen)) parenDepth--;
+            // Array destructuring: [a, b, c]
             NextToken();
-        }
 
+            while (!Check(TokenType.RightBracket))
+            {
+                if (Check(TokenType.Comma))
+                {
+                    // Elision - skip element
+                    NextToken();
+                    EmitOp(OpCode.Drop);
+                    continue;
+                }
+
+                bool isRest = Match(TokenType.Ellipsis);
+
+                if (Check(TokenType.Identifier))
+                {
+                    var name = (string)_currentToken.Value!;
+                    var atom = _atoms.GetOrCreateAtom(name);
+                    NextToken();
+
+                    if (isRest)
+                    {
+                        EmitOp(OpCode.ArrayFrom);
+                        EmitU16(0); // Collect remaining
+                    }
+                    else
+                    {
+                        // Get next array element
+                        EmitOp(OpCode.IteratorNext);
+                    }
+
+                    if (isDeclaration)
+                    {
+                        EmitOp(OpCode.ScopePutVarInit);
+                        EmitAtom(atom);
+                        EmitU16((ushort)_currentFunction.ScopeLevel);
+                    }
+                    else
+                    {
+                        EmitOp(OpCode.PutRefValue);
+                    }
+                }
+                else if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+                {
+                    // Nested destructuring
+                    EmitOp(OpCode.IteratorNext);
+                    ParseDestructuringPattern(isDeclaration, hasDefaultAllowed);
+                }
+
+                if (!Match(TokenType.Comma))
+                {
+                    break;
+                }
+            }
+
+            Expect(TokenType.RightBracket);
+        }
+        else if (Check(TokenType.LeftBrace))
+        {
+            // Object destructuring: { a, b, c }
+            NextToken();
+
+            while (!Check(TokenType.RightBrace))
+            {
+                JSAtom propName;
+                JSAtom varName;
+
+                if (Check(TokenType.Identifier))
+                {
+                    var name = (string)_currentToken.Value!;
+                    propName = _atoms.GetOrCreateAtom(name);
+                    varName = propName;
+                    NextToken();
+
+                    // Check for renaming: { prop: newName }
+                    if (Match(TokenType.Colon))
+                    {
+                        if (!Check(TokenType.Identifier))
+                        {
+                            throw new JSSyntaxError(
+                                "Expected identifier after ':'",
+                                _currentToken.Start);
+                        }
+                        var newName = (string)_currentToken.Value!;
+                        varName = _atoms.GetOrCreateAtom(newName);
+                        NextToken();
+                    }
+
+                    // Get the property from the object
+                    EmitOp(OpCode.Dup);
+                    EmitOp(OpCode.GetField);
+                    EmitAtom(propName);
+
+                    // Check for default value
+                    if (hasDefaultAllowed && Match(TokenType.Assign))
+                    {
+                        int label = NewLabel();
+                        EmitOp(OpCode.Dup);
+                        EmitOp(OpCode.Undefined);
+                        EmitOp(OpCode.StrictEq);
+                        EmitGoto(OpCode.IfFalse, label);
+                        EmitOp(OpCode.Drop);
+                        ParseAssignExpression();
+                        EmitLabel(label);
+                    }
+
+                    // Store the value
+                    if (isDeclaration)
+                    {
+                        EmitOp(OpCode.ScopePutVarInit);
+                        EmitAtom(varName);
+                        EmitU16((ushort)_currentFunction.ScopeLevel);
+                    }
+                    else
+                    {
+                        EmitOp(OpCode.PutRefValue);
+                    }
+                }
+
+                if (!Match(TokenType.Comma))
+                {
+                    break;
+                }
+            }
+
+            Expect(TokenType.RightBrace);
+            EmitOp(OpCode.Drop); // Drop the source object
+        }
+    }
+
+    /// <summary>
+    /// Parses the function body enclosed in braces.
+    /// </summary>
+    private void ParseFunctionBody()
+    {
         Expect(TokenType.LeftBrace);
-        int braceDepth = 1;
-        while (braceDepth > 0 && !Check(TokenType.EOF))
+
+        // Parse directives (like "use strict")
+        while (Check(TokenType.String))
         {
-            if (Check(TokenType.LeftBrace)) braceDepth++;
-            else if (Check(TokenType.RightBrace)) braceDepth--;
+            var directive = (string)_currentToken.Value!;
+            if (directive == "use strict")
+            {
+                _currentFunction.IsStrict = true;
+            }
             NextToken();
+            if (!Match(TokenType.Semicolon) && !_currentToken.HasLineTerminatorBefore)
+            {
+                break;
+            }
         }
+
+        // Parse statements
+        while (!Check(TokenType.RightBrace) && !Check(TokenType.EOF))
+        {
+            ParseStatement();
+        }
+
+        Expect(TokenType.RightBrace);
+    }
+
+    /// <summary>
+    /// Checks if the current bytecode ends with a return statement.
+    /// </summary>
+    private bool EndsWithReturn()
+    {
+        var buffer = _currentFunction.ByteCode;
+        if (buffer.Size < 1)
+            return false;
+
+        // Get the byte at the last opcode position
+        int lastPos = buffer.LastOpcodePosition;
+        if (lastPos < 0)
+            return false;
+
+        var bytes = buffer.ToArray();
+        var lastOp = (OpCode)bytes[lastPos];
+        return lastOp == OpCode.Return || lastOp == OpCode.ReturnAsync;
+    }
+
+    /// <summary>
+    /// Parses an arrow function: (params) => expr or (params) => { body }
+    /// Called after the parameters have been parsed as an expression.
+    /// </summary>
+    public void ParseArrowFunction(JSFunctionKind kind = JSFunctionKind.Normal)
+    {
+        ParseFunction(JSParseFunctionType.Arrow, kind, JSAtom.Empty);
     }
 
     #endregion

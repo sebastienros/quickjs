@@ -465,6 +465,7 @@ public sealed class Lexer
             // Functions
             ["return"] = TokenType.Return,
             ["function"] = TokenType.Function,
+            ["async"] = TokenType.Async,
             ["yield"] = TokenType.Yield,
             ["await"] = TokenType.Await,
 

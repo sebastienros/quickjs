@@ -93,6 +93,22 @@ public sealed class ConstantPool
     }
 
     /// <summary>
+    /// Adds a function reference to the pool.
+    /// </summary>
+    /// <param name="funcIndex">The index of the child function in the Children list.</param>
+    /// <returns>The index of the constant in the pool.</returns>
+    /// <remarks>
+    /// Function references are stored as special markers in the constant pool.
+    /// During execution, they are resolved to the actual function object.
+    /// </remarks>
+    public int AddFunction(int funcIndex)
+    {
+        // Store as a tagged integer marking it as a function reference
+        // We use a negative tag value to distinguish from regular constants
+        return Add(JSValue.FromInt32(-funcIndex - 1));
+    }
+
+    /// <summary>
     /// Gets the constant at the specified index.
     /// </summary>
     /// <param name="index">The constant pool index.</param>

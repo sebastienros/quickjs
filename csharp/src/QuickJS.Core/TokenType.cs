@@ -116,6 +116,9 @@ public enum TokenType
     /// <summary>function keyword.</summary>
     Function,
 
+    /// <summary>async keyword.</summary>
+    Async,
+
     /// <summary>yield keyword.</summary>
     Yield,
 
@@ -281,6 +284,9 @@ public enum TokenType
     /// <summary>Ellipsis '...'.</summary>
     Ellipsis,
 
+    /// <summary>Arrow '=>'.</summary>
+    Arrow,
+
     // ========================================
     // Operators - Arithmetic
     // ========================================
@@ -436,9 +442,6 @@ public enum TokenType
 
     /// <summary>Conditional/ternary '?'.</summary>
     Question,
-
-    /// <summary>Arrow function '=>'.</summary>
-    Arrow,
 
     /// <summary>Optional chaining '?.'.</summary>
     OptionalChaining,

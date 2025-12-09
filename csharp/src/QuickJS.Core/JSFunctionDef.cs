@@ -105,6 +105,26 @@ public enum JSParseFunctionType : byte
 /// </remarks>
 public sealed class JSFunctionDef
 {
+    #region Constructors
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="JSFunctionDef"/> class.
+    /// </summary>
+    public JSFunctionDef()
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="JSFunctionDef"/> class with the specified name.
+    /// </summary>
+    /// <param name="funcName">The function name atom.</param>
+    public JSFunctionDef(JSAtom funcName)
+    {
+        FuncName = funcName;
+    }
+
+    #endregion
+
     #region Compilation Context
 
     /// <summary>
@@ -120,6 +140,21 @@ public sealed class JSFunctionDef
     /// Gets the list of child functions defined within this function.
     /// </summary>
     public List<JSFunctionDef> Children { get; } = new List<JSFunctionDef>();
+
+    /// <summary>
+    /// Adds a child function and returns its index.
+    /// </summary>
+    /// <param name="child">The child function to add.</param>
+    /// <returns>The index of the child function in the Children list.</returns>
+    public int AddChildFunction(JSFunctionDef child)
+    {
+        int idx = Children.Count;
+        Children.Add(child);
+        child.Parent = this;
+        child.ParentCPoolIndex = Constants.AddFunction(idx);
+        child.ParentScopeLevel = ScopeLevel;
+        return idx;
+    }
 
     /// <summary>
     /// Gets or sets the index of this function in the parent's constant pool.
@@ -217,6 +252,11 @@ public sealed class JSFunctionDef
     public bool SuperAllowed { get; set; }
 
     /// <summary>
+    /// Gets or sets whether the <c>arguments</c> identifier is allowed in this function.
+    /// </summary>
+    public bool ArgumentsAllowed { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets whether the function contains a call to <c>eval()</c>.
     /// </summary>
     /// <remarks>
@@ -229,6 +269,20 @@ public sealed class JSFunctionDef
     /// Gets or sets whether this is a derived class constructor.
     /// </summary>
     public bool IsDerivedClassConstructor { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether this function has a prototype property.
+    /// </summary>
+    /// <remarks>
+    /// Arrow functions and methods don't have a prototype property.
+    /// Only regular function declarations and expressions have one.
+    /// </remarks>
+    public bool HasPrototype { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether this function has a home object for super references.
+    /// </summary>
+    public bool HasHomeObject { get; set; }
 
     #endregion
 
@@ -266,6 +320,16 @@ public sealed class JSFunctionDef
     /// Gets the list of argument definitions.
     /// </summary>
     public List<JSVarDef> Args { get; } = new List<JSVarDef>();
+
+    /// <summary>
+    /// Gets the number of arguments.
+    /// </summary>
+    public int ArgCount => Args.Count;
+
+    /// <summary>
+    /// Gets or sets the number of required arguments (before any with defaults).
+    /// </summary>
+    public int DefinedArgCount { get; set; }
 
     /// <summary>
     /// Gets the list of closure variables (captured from outer scopes).
