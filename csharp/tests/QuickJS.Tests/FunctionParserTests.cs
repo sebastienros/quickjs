@@ -7,9 +7,8 @@ namespace QuickJS.Tests;
 /// <summary>
 /// Tests for function parsing in the JavaScript parser.
 /// 
-/// This step focuses on function declarations as statements.
-/// Function expressions and arrow functions require additional expression
-/// parsing support that will be added in a later step.
+/// This includes function declarations, function expressions, arrow functions,
+/// async functions, generators, and related features.
 /// </summary>
 public class FunctionParserTests
 {
@@ -110,7 +109,7 @@ public class FunctionParserTests
 
     #region Generator Functions
 
-    [Fact(Skip = "Yield expression parsing not yet implemented")]
+    [Fact]
     public void ParseFunctionDeclaration_Generator_Succeeds()
     {
         var atoms = new AtomTable();
@@ -120,7 +119,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Yield expression parsing not yet implemented")]
+    [Fact]
     public void ParseFunctionDeclaration_GeneratorWithYield_Succeeds()
     {
         var atoms = new AtomTable();
@@ -151,7 +150,7 @@ public class FunctionParserTests
 
     #region Async Functions
 
-    [Fact(Skip = "Async function declaration parsing not yet integrated")]
+    [Fact]
     public void ParseFunctionDeclaration_Async_Succeeds()
     {
         var atoms = new AtomTable();
@@ -161,7 +160,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Async function declaration parsing not yet integrated")]
+    [Fact]
     public void ParseFunctionDeclaration_AsyncWithAwait_Succeeds()
     {
         var atoms = new AtomTable();
@@ -176,7 +175,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Async function declaration parsing not yet integrated")]
+    [Fact]
     public void ParseFunctionDeclaration_AsyncGenerator_Succeeds()
     {
         var atoms = new AtomTable();
@@ -190,7 +189,7 @@ public class FunctionParserTests
 
     #region Function Expressions
 
-    [Fact(Skip = "Function expressions not yet implemented")]
+    [Fact]
     public void ParseFunctionExpression_Anonymous_Succeeds()
     {
         var atoms = new AtomTable();
@@ -200,7 +199,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Function expressions not yet implemented")]
+    [Fact]
     public void ParseFunctionExpression_Named_Succeeds()
     {
         var atoms = new AtomTable();
@@ -210,7 +209,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Function expressions not yet implemented")]
+    [Fact]
     public void ParseFunctionExpression_IIFE_Succeeds()
     {
         var atoms = new AtomTable();
@@ -220,7 +219,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Function expressions not yet implemented")]
+    [Fact]
     public void ParseFunctionExpression_AsArgument_Succeeds()
     {
         var atoms = new AtomTable();
@@ -234,7 +233,7 @@ public class FunctionParserTests
 
     #region Arrow Functions
 
-    [Fact(Skip = "Arrow function parsing in expressions not yet implemented")]
+    [Fact(Skip = "Single param without parens needs lookahead")]
     public void ParseArrowFunction_SingleParam_NoParens_Succeeds()
     {
         var atoms = new AtomTable();
@@ -244,7 +243,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Arrow function parsing in expressions not yet implemented")]
+    [Fact]
     public void ParseArrowFunction_NoParams_Succeeds()
     {
         var atoms = new AtomTable();
@@ -254,7 +253,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Arrow function parsing in expressions not yet implemented")]
+    [Fact]
     public void ParseArrowFunction_MultipleParams_Succeeds()
     {
         var atoms = new AtomTable();
@@ -264,7 +263,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Arrow function parsing in expressions not yet implemented")]
+    [Fact]
     public void ParseArrowFunction_WithBlock_Succeeds()
     {
         var atoms = new AtomTable();
@@ -274,7 +273,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Arrow function parsing in expressions not yet implemented")]
+    [Fact(Skip = "Single param without parens needs lookahead")]
     public void ParseArrowFunction_Nested_Succeeds()
     {
         var atoms = new AtomTable();
@@ -284,7 +283,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Arrow function parsing in expressions not yet implemented")]
+    [Fact]
     public void ParseArrowFunction_AsyncArrow_Succeeds()
     {
         var atoms = new AtomTable();
@@ -294,7 +293,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Arrow function parsing in expressions not yet implemented")]
+    [Fact]
     public void ParseArrowFunction_AsyncWithParams_Succeeds()
     {
         var atoms = new AtomTable();
@@ -479,7 +478,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Function expressions not yet implemented")]
+    [Fact]
     public void ParseProgram_ClosurePattern_Succeeds()
     {
         var atoms = new AtomTable();
@@ -574,7 +573,7 @@ public class FunctionParserTests
 
     #region Function In Expressions
 
-    [Fact(Skip = "Function expressions not yet implemented")]
+    [Fact]
     public void ParseExpression_FunctionInTernary_Succeeds()
     {
         var atoms = new AtomTable();
@@ -584,7 +583,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Function expressions not yet implemented")]
+    [Fact]
     public void ParseExpression_FunctionInArray_Succeeds()
     {
         var atoms = new AtomTable();
@@ -594,7 +593,7 @@ public class FunctionParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
-    [Fact(Skip = "Function expressions not yet implemented")]
+    [Fact]
     public void ParseExpression_FunctionInObject_Succeeds()
     {
         var atoms = new AtomTable();

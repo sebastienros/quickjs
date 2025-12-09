@@ -46,6 +46,22 @@ public sealed class ByteCodeBuffer
     public int LabelCount => _labels.Count;
 
     /// <summary>
+    /// Truncates the buffer to the specified size.
+    /// Used when reparsing (e.g., arrow function detection).
+    /// </summary>
+    /// <param name="newSize">The new size of the buffer.</param>
+    public void Truncate(int newSize)
+    {
+        if (newSize < 0)
+            throw new ArgumentOutOfRangeException(nameof(newSize), "Size cannot be negative");
+        if (newSize > _size)
+            throw new ArgumentOutOfRangeException(nameof(newSize), "Cannot truncate to larger size");
+        _size = newSize;
+        if (_lastOpcodePosition >= newSize)
+            _lastOpcodePosition = -1;
+    }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="ByteCodeBuffer"/> class.
     /// </summary>
     /// <param name="initialCapacity">The initial capacity of the buffer.</param>

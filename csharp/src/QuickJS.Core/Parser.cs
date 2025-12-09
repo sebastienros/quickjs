@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections.Generic;
 
 namespace QuickJS;
 
@@ -177,11 +178,19 @@ public sealed class Parser
     #region Expression Parsing
 
     /// <summary>
-    /// Parses an expression.
+    /// Parses an expression (comma expression - lowest precedence).
+    /// The comma operator evaluates each operand and returns the last.
     /// </summary>
     public void ParseExpression()
     {
         ParseAssignExpression(ParseFlags.InAccepted);
+
+        // Handle comma operator: expr, expr, expr
+        while (Match(TokenType.Comma))
+        {
+            EmitOp(OpCode.Drop); // Discard previous value
+            ParseAssignExpression(ParseFlags.InAccepted);
+        }
     }
 
     /// <summary>
@@ -616,6 +625,7 @@ public sealed class Parser
 
     /// <summary>
     /// Parses a unary expression: !expr, -expr, +expr, typeof expr, new expr, etc.
+    /// Also handles yield and await which have similar precedence.
     /// </summary>
     public void ParseUnaryExpression(ParseFlags flags)
     {
@@ -623,6 +633,16 @@ public sealed class Parser
         {
             case TokenType.New:
                 ParseNewExpression();
+                break;
+
+            case TokenType.Yield:
+                // yield is a unary-like expression in generators
+                ParseYieldExpression();
+                break;
+
+            case TokenType.Await:
+                // await is a unary-like expression in async functions
+                ParseAwaitExpression();
                 break;
 
             case TokenType.Plus:
@@ -834,9 +854,7 @@ public sealed class Parser
                 break;
 
             case TokenType.LeftParen:
-                NextToken();
-                ParseExpression();
-                Expect(TokenType.RightParen);
+                ParseParenthesizedExpressionOrArrow();
                 break;
 
             case TokenType.LeftBracket:
@@ -848,13 +866,574 @@ public sealed class Parser
                 break;
 
             case TokenType.Function:
-                // TODO: ParseFunctionExpression();
-                throw new NotImplementedException("Function expressions not yet implemented");
+                ParseFunctionExpression();
+                break;
+
+            case TokenType.Async:
+                // async function or async arrow
+                ParseAsyncExpression();
+                break;
+
+            case TokenType.Yield:
+                ParseYieldExpression();
+                break;
+
+            case TokenType.Await:
+                ParseAwaitExpression();
+                break;
+
+            case TokenType.Super:
+                ParseSuperExpression();
+                break;
 
             default:
                 throw new JSSyntaxError(
                     $"Unexpected token: {_currentToken.Type}",
                     _currentToken.Start);
+        }
+    }
+
+    /// <summary>
+    /// Parses a parenthesized expression or arrow function.
+    /// This requires lookahead to distinguish: (expr) vs (params) => body
+    /// </summary>
+    private void ParseParenthesizedExpressionOrArrow()
+    {
+        NextToken(); // consume '('
+
+        // Check for empty parens: () => ...
+        if (Check(TokenType.RightParen))
+        {
+            NextToken(); // consume ')'
+            if (!Check(TokenType.Arrow))
+            {
+                throw new JSSyntaxError(
+                    "Unexpected token ')'",
+                    _currentToken.Start);
+            }
+            // Empty arrow function - parse it directly with no params
+            ParseArrowFunctionDirect(JSFunctionKind.Normal, new List<JSAtom>());
+            return;
+        }
+
+        // Check for rest parameter: (...) => ...
+        if (Check(TokenType.Ellipsis))
+        {
+            // This must be an arrow function with rest param
+            ParseArrowFunctionWithParams(JSFunctionKind.Normal);
+            return;
+        }
+
+        // Try to parse as expression first, but track identifiers for potential arrow params
+        // We parse expressions but keep track of whether each position was a simple identifier
+        int startPos = _currentFunction.ByteCode.Size;
+        var potentialParams = new List<JSAtom>();
+        bool couldBeArrowParams = true;
+
+        // Parse first expression, tracking if it's a simple identifier
+        if (Check(TokenType.Identifier))
+        {
+            var name = (string)_currentToken.Value!;
+            potentialParams.Add(_atoms.GetOrCreateAtom(name));
+        }
+        else
+        {
+            couldBeArrowParams = false;
+        }
+        ParseAssignExpression();
+
+        // Check what follows
+        while (Check(TokenType.Comma))
+        {
+            NextToken(); // consume ','
+
+            // Check for rest after comma: (a, ...rest) => ...
+            if (Check(TokenType.Ellipsis))
+            {
+                // Must be arrow function with rest param
+                // Truncate what we've parsed and use ParseArrowFunctionWithParams
+                _currentFunction.ByteCode.Truncate(startPos);
+                // Can't easily reparse from here - for now, error
+                throw new JSSyntaxError(
+                    "Rest parameters in arrow functions not yet supported in this context",
+                    _currentToken.Start);
+            }
+
+            // Track if this is an identifier
+            if (couldBeArrowParams && Check(TokenType.Identifier))
+            {
+                var name = (string)_currentToken.Value!;
+                potentialParams.Add(_atoms.GetOrCreateAtom(name));
+            }
+            else
+            {
+                couldBeArrowParams = false;
+            }
+
+            EmitOp(OpCode.Drop); // Drop previous if it's comma expression
+            ParseAssignExpression();
+        }
+
+        Expect(TokenType.RightParen);
+
+        if (Check(TokenType.Arrow))
+        {
+            if (!couldBeArrowParams)
+            {
+                throw new JSSyntaxError(
+                    "Invalid arrow function parameter list",
+                    _currentToken.Start);
+            }
+            // It's an arrow function! Truncate emitted code and build arrow function
+            _currentFunction.ByteCode.Truncate(startPos);
+            ParseArrowFunctionDirect(JSFunctionKind.Normal, potentialParams);
+            return;
+        }
+
+        // It was just a parenthesized expression - bytecode is already emitted
+    }
+
+    /// <summary>
+    /// Parse arrow function directly when we already know the parameters.
+    /// Used when we've already consumed (...params) and detected =>.
+    /// </summary>
+    private void ParseArrowFunctionDirect(JSFunctionKind kind, List<JSAtom> parameters)
+    {
+        // Save parent and create new function
+        var parentFunction = _currentFunction;
+        var newFunction = new JSFunctionDef(JSAtom.Empty);
+        newFunction.Filename = parentFunction.Filename;
+        newFunction.Parent = parentFunction;
+        newFunction.FuncKind = kind;
+        newFunction.FuncType = JSParseFunctionType.Arrow;
+
+        ConfigureFunctionByType(newFunction, JSParseFunctionType.Arrow, kind);
+        _currentFunction = newFunction;
+
+        // Add all parameters
+        foreach (var param in parameters)
+        {
+            _currentFunction.AddArg(param);
+        }
+        _currentFunction.DefinedArgCount = parameters.Count;
+        _currentFunction.HasSimpleParameterList = true;
+
+        // Expect and consume arrow
+        Expect(TokenType.Arrow);
+
+        // Parse body
+        _currentFunction.PushScope();
+
+        if (Check(TokenType.LeftBrace))
+        {
+            ParseFunctionBody();
+        }
+        else
+        {
+            ParseAssignExpression();
+            if ((kind & JSFunctionKind.Async) != 0)
+                EmitOp(OpCode.ReturnAsync);
+            else
+                EmitOp(OpCode.Return);
+        }
+
+        _currentFunction.PopScope();
+
+        // Finalize
+        if (!EndsWithReturn())
+        {
+            EmitOp(OpCode.Undefined);
+            EmitOp(OpCode.Return);
+        }
+
+        int funcIdx = parentFunction.AddChildFunction(newFunction);
+        _currentFunction = parentFunction;
+
+        EmitOp(OpCode.FClosure);
+        EmitU16((ushort)funcIdx);
+    }
+
+    /// <summary>
+    /// Parse arrow function when we already know we have arrow params pattern.
+    /// Called when we see something like (...rest) or after detecting =>
+    /// </summary>
+    private void ParseArrowFunctionWithParams(JSFunctionKind kind)
+    {
+        // Save parent and create new function
+        var parentFunction = _currentFunction;
+        var newFunction = new JSFunctionDef(JSAtom.Empty);
+        newFunction.Filename = parentFunction.Filename;
+        newFunction.Parent = parentFunction;
+        newFunction.FuncKind = kind;
+        newFunction.FuncType = JSParseFunctionType.Arrow;
+
+        ConfigureFunctionByType(newFunction, JSParseFunctionType.Arrow, kind);
+        _currentFunction = newFunction;
+
+        // Parse parameters (we're already past the '(')
+        bool hasOptionalArg = false;
+        bool hasSimpleParameterList = true;
+
+        while (!Check(TokenType.RightParen))
+        {
+            bool isRest = Match(TokenType.Ellipsis);
+            if (isRest) hasSimpleParameterList = false;
+
+            if (Check(TokenType.Identifier))
+            {
+                var paramName = (string)_currentToken.Value!;
+                var paramAtom = _atoms.GetOrCreateAtom(paramName);
+                NextToken();
+
+                int idx = _currentFunction.AddArg(paramAtom);
+
+                if (isRest)
+                {
+                    // Rest parameter
+                    EmitOp(OpCode.Rest);
+                    EmitU16((ushort)idx);
+                    EmitOp(OpCode.PutArg);
+                    EmitU16((ushort)idx);
+                    hasOptionalArg = true;
+                }
+                else if (Match(TokenType.Assign))
+                {
+                    // Default parameter
+                    hasSimpleParameterList = false;
+                    hasOptionalArg = true;
+
+                    int label = NewLabel();
+                    EmitOp(OpCode.GetArg);
+                    EmitU16((ushort)idx);
+                    EmitOp(OpCode.Dup);
+                    EmitOp(OpCode.Undefined);
+                    EmitOp(OpCode.StrictEq);
+                    EmitGoto(OpCode.IfFalse, label);
+                    EmitOp(OpCode.Drop);
+                    ParseAssignExpression();
+                    EmitOp(OpCode.Dup);
+                    EmitOp(OpCode.PutArg);
+                    EmitU16((ushort)idx);
+                    EmitLabel(label);
+                    EmitOp(OpCode.ScopePutVarInit);
+                    EmitAtom(paramAtom);
+                    EmitU16((ushort)_currentFunction.ScopeLevel);
+                }
+                else
+                {
+                    if (!hasOptionalArg)
+                        _currentFunction.DefinedArgCount++;
+                }
+            }
+            else
+            {
+                throw new JSSyntaxError(
+                    $"Expected parameter name, got {_currentToken.Type}",
+                    _currentToken.Start);
+            }
+
+            if (isRest && !Check(TokenType.RightParen))
+            {
+                throw new JSSyntaxError(
+                    "Rest parameter must be last",
+                    _currentToken.Start);
+            }
+
+            if (!Match(TokenType.Comma))
+                break;
+        }
+
+        Expect(TokenType.RightParen);
+        _currentFunction.HasSimpleParameterList = hasSimpleParameterList;
+
+        // Expect and consume arrow
+        Expect(TokenType.Arrow);
+
+        // Parse body
+        _currentFunction.PushScope();
+
+        if (Check(TokenType.LeftBrace))
+        {
+            ParseFunctionBody();
+        }
+        else
+        {
+            ParseAssignExpression();
+            if ((kind & JSFunctionKind.Async) != 0)
+                EmitOp(OpCode.ReturnAsync);
+            else
+                EmitOp(OpCode.Return);
+        }
+
+        _currentFunction.PopScope();
+
+        // Finalize
+        if (!EndsWithReturn())
+        {
+            EmitOp(OpCode.Undefined);
+            EmitOp(OpCode.Return);
+        }
+
+        int funcIdx = parentFunction.AddChildFunction(newFunction);
+        _currentFunction = parentFunction;
+
+        EmitOp(OpCode.FClosure);
+        EmitU16((ushort)funcIdx);
+    }
+    /// <summary>
+    /// Parses an async expression: async function or async arrow function
+    /// </summary>
+    private void ParseAsyncExpression()
+    {
+        NextToken(); // consume 'async'
+
+        // Check if the NEXT token is preceded by a line terminator
+        // If so, 'async' should be treated as an identifier (but we've consumed it)
+        // According to ECMAScript, async [no LineTerminator here] ArrowFunction
+        if (_currentToken.HasLineTerminatorBefore)
+        {
+            // There's a line terminator after 'async', so it should be an identifier
+            // But we've already consumed 'async' - emit it as an identifier
+            // We emit the atom for "async" directly
+            var asyncAtom = _atoms.GetOrCreateAtom("async");
+            EmitOp(OpCode.ScopeGetVar);
+            EmitAtom(asyncAtom);
+            EmitU16((ushort)_currentFunction.ScopeLevel);
+            return;
+        }
+
+        if (Check(TokenType.Function))
+        {
+            // async function expression
+            ParseFunction(JSParseFunctionType.Expression, JSFunctionKind.Async, JSAtom.Empty);
+        }
+        else if (Check(TokenType.LeftParen))
+        {
+            // async arrow function: async () => ... or async (params) => ...
+            NextToken(); // consume '('
+            ParseArrowFunctionWithParams(JSFunctionKind.Async);
+        }
+        else if (Check(TokenType.Identifier))
+        {
+            // async arrow function with single param: async x => ...
+            var paramName = (string)_currentToken.Value!;
+            var paramAtom = _atoms.GetOrCreateAtom(paramName);
+            NextToken();
+
+            if (!Check(TokenType.Arrow))
+            {
+                throw new JSSyntaxError(
+                    "Expected '=>' after async parameter",
+                    _currentToken.Start);
+            }
+
+            // Build the async arrow function
+            var parentFunction = _currentFunction;
+            var newFunction = new JSFunctionDef(JSAtom.Empty);
+            newFunction.Filename = parentFunction.Filename;
+            newFunction.Parent = parentFunction;
+            newFunction.FuncKind = JSFunctionKind.Async;
+            newFunction.FuncType = JSParseFunctionType.Arrow;
+
+            ConfigureFunctionByType(newFunction, JSParseFunctionType.Arrow, JSFunctionKind.Async);
+            _currentFunction = newFunction;
+
+            _currentFunction.AddArg(paramAtom);
+            _currentFunction.DefinedArgCount = 1;
+            _currentFunction.HasSimpleParameterList = true;
+
+            Expect(TokenType.Arrow);
+
+            _currentFunction.PushScope();
+
+            if (Check(TokenType.LeftBrace))
+            {
+                ParseFunctionBody();
+            }
+            else
+            {
+                ParseAssignExpression();
+                EmitOp(OpCode.ReturnAsync);
+            }
+
+            _currentFunction.PopScope();
+
+            if (!EndsWithReturn())
+            {
+                EmitOp(OpCode.Undefined);
+                EmitOp(OpCode.Return);
+            }
+
+            int funcIdx = parentFunction.AddChildFunction(newFunction);
+            _currentFunction = parentFunction;
+
+            EmitOp(OpCode.FClosure);
+            EmitU16((ushort)funcIdx);
+        }
+        else
+        {
+            throw new JSSyntaxError(
+                "Expected function or arrow function after 'async'",
+                _currentToken.Start);
+        }
+    }
+
+    /// <summary>
+    /// Parses a yield expression: yield, yield expr, or yield* expr
+    /// </summary>
+    private void ParseYieldExpression()
+    {
+        if ((_currentFunction.FuncKind & JSFunctionKind.Generator) == 0)
+        {
+            throw new JSSyntaxError(
+                "yield expression is only valid in generator functions",
+                _currentToken.Start);
+        }
+
+        NextToken(); // consume 'yield'
+
+        bool isStar = Match(TokenType.Asterisk);
+
+        // Check for expression after yield (respecting line terminator)
+        if (!_currentToken.HasLineTerminatorBefore &&
+            !Check(TokenType.Semicolon) &&
+            !Check(TokenType.RightParen) &&
+            !Check(TokenType.RightBracket) &&
+            !Check(TokenType.RightBrace) &&
+            !Check(TokenType.Comma) &&
+            !Check(TokenType.Colon) &&
+            !Check(TokenType.EOF))
+        {
+            ParseAssignExpression();
+        }
+        else
+        {
+            EmitOp(OpCode.Undefined);
+        }
+
+        if (isStar)
+        {
+            if ((_currentFunction.FuncKind & JSFunctionKind.Async) != 0)
+            {
+                EmitOp(OpCode.AsyncYieldStar);
+            }
+            else
+            {
+                EmitOp(OpCode.YieldStar);
+            }
+        }
+        else
+        {
+            EmitOp(OpCode.Yield);
+        }
+    }
+
+    /// <summary>
+    /// Parses an await expression: await expr
+    /// </summary>
+    private void ParseAwaitExpression()
+    {
+        if ((_currentFunction.FuncKind & JSFunctionKind.Async) == 0)
+        {
+            throw new JSSyntaxError(
+                "await expression is only valid in async functions",
+                _currentToken.Start);
+        }
+
+        NextToken(); // consume 'await'
+
+        // Parse the expression to await
+        ParseUnaryExpression(ParseFlags.None);
+
+        EmitOp(OpCode.Await);
+    }
+
+    /// <summary>
+    /// Parses a super expression: super.prop, super[expr], or super(args)
+    /// </summary>
+    private void ParseSuperExpression()
+    {
+        NextToken(); // consume 'super'
+
+        if (Check(TokenType.LeftParen))
+        {
+            // super() - constructor call
+            if (!_currentFunction.SuperCallAllowed)
+            {
+                throw new JSSyntaxError(
+                    "super() is only valid in derived class constructors",
+                    _currentToken.Start);
+            }
+
+            // Get the super constructor
+            EmitOp(OpCode.GetSuper);
+
+            NextToken(); // consume '('
+            int argCount = 0;
+
+            if (!Check(TokenType.RightParen))
+            {
+                do
+                {
+                    ParseAssignExpression();
+                    argCount++;
+                }
+                while (Match(TokenType.Comma));
+            }
+
+            Expect(TokenType.RightParen);
+
+            // Call the super constructor
+            EmitOp(OpCode.CallConstructor);
+            EmitU16((ushort)argCount);
+        }
+        else if (Check(TokenType.Dot))
+        {
+            // super.property
+            if (!_currentFunction.SuperAllowed)
+            {
+                throw new JSSyntaxError(
+                    "super property access is only valid in methods",
+                    _currentToken.Start);
+            }
+
+            NextToken(); // consume '.'
+
+            if (!Check(TokenType.Identifier))
+            {
+                throw new JSSyntaxError(
+                    "Expected property name after 'super.'",
+                    _currentToken.Start);
+            }
+
+            var name = (string)_currentToken.Value!;
+            var atom = _atoms.GetOrCreateAtom(name);
+            NextToken();
+
+            EmitOp(OpCode.GetSuper);
+            EmitAtom(atom);
+        }
+        else if (Check(TokenType.LeftBracket))
+        {
+            // super[expr]
+            if (!_currentFunction.SuperAllowed)
+            {
+                throw new JSSyntaxError(
+                    "super property access is only valid in methods",
+                    _currentToken.Start);
+            }
+
+            NextToken(); // consume '['
+            ParseExpression();
+            Expect(TokenType.RightBracket);
+
+            EmitOp(OpCode.GetSuperValue);
+        }
+        else
+        {
+            throw new JSSyntaxError(
+                "super must be followed by argument list or member access",
+                _currentToken.Start);
         }
     }
 
@@ -1192,10 +1771,38 @@ public sealed class Parser
                 ParseFunctionDeclaration();
                 break;
 
+            case TokenType.Async:
+                // async function declaration
+                ParseAsyncFunctionDeclaration();
+                break;
+
             default:
                 ParseExpressionStatement();
                 break;
         }
+    }
+
+    /// <summary>
+    /// Parses an async function declaration: async function name() { }
+    /// </summary>
+    private void ParseAsyncFunctionDeclaration()
+    {
+        NextToken(); // consume 'async'
+
+        // Check for line terminator after async (would make it an identifier)
+        // According to ECMAScript, 'async [no LineTerminator here] function' is async function
+        if (_currentToken.HasLineTerminatorBefore || !Check(TokenType.Function))
+        {
+            // Treat 'async' as an identifier used as an expression
+            // This is a bit complex as we've already consumed 'async'
+            // For now, require 'function' keyword after async in statement position
+            throw new JSSyntaxError(
+                "Expected 'function' after 'async' in statement position",
+                _currentToken.Start);
+        }
+
+        // Parse as async function declaration
+        ParseFunction(JSParseFunctionType.Statement, JSFunctionKind.Async, JSAtom.Empty);
     }
 
     /// <summary>
