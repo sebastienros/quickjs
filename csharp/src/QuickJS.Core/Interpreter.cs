@@ -105,7 +105,15 @@ public sealed class Interpreter
 
     #region Call Helpers
 
-    private JSValue CallFunction(JSValue calleeVal, JSValue thisVal, JSValue[] args, bool isConstructor = false)
+    /// <summary>
+    /// Calls a function with the specified arguments.
+    /// </summary>
+    /// <param name="calleeVal">The function to call.</param>
+    /// <param name="thisVal">The 'this' value.</param>
+    /// <param name="args">The arguments.</param>
+    /// <param name="isConstructor">Whether this is a constructor call.</param>
+    /// <returns>The return value.</returns>
+    public JSValue CallFunction(JSValue calleeVal, JSValue thisVal, JSValue[] args, bool isConstructor = false)
     {
         if (!calleeVal.IsObject)
         {
@@ -146,6 +154,13 @@ public sealed class Interpreter
             {
                 var generator = new JSGenerator(_context, func, thisVal, args);
                 return JSValue.FromObject(generator);
+            }
+
+            // Async functions return a promise and execute asynchronously
+            if (func.IsAsync && !func.IsGenerator && !isConstructor)
+            {
+                var asyncExecutor = new JSAsyncFunctionExecutor(_context, func, thisVal, args);
+                return asyncExecutor.Start();
             }
 
             var savedFrame = _currentFrame;

@@ -508,6 +508,14 @@ public sealed class JSGenerator : JSObject
                         return (JSValue.Undefined, GeneratorReturnType.Yield);
                     }
 
+                case OpCode.Await:
+                    {
+                        // Save state and return the value to await (treated like yield for async functions)
+                        var awaitValue = PopStack();
+                        _funcState.ProgramCounter = pc;
+                        return (awaitValue, GeneratorReturnType.Yield);
+                    }
+
                 case OpCode.Return:
                     {
                         var returnValue = PopStack();

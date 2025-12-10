@@ -403,6 +403,11 @@ public sealed class JSContext : IDisposable
     #region Exception Handling
 
     /// <summary>
+    /// Gets the current exception without clearing it.
+    /// </summary>
+    public JSValue CurrentException => _currentException;
+
+    /// <summary>
     /// Sets the current exception for this context.
     /// </summary>
     /// <param name="exception">The exception value.</param>
