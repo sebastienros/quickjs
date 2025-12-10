@@ -1234,7 +1234,7 @@ public sealed class Parser
         _currentFunction = parentFunction;
 
         EmitOp(OpCode.FClosure);
-        EmitU16((ushort)funcIdx);
+        EmitU32((uint)funcIdx);
     }
 
     /// <summary>
@@ -1380,7 +1380,7 @@ public sealed class Parser
         _currentFunction = parentFunction;
 
         EmitOp(OpCode.FClosure);
-        EmitU16((ushort)funcIdx);
+        EmitU32((uint)funcIdx);
     }
     /// <summary>
     /// Parses an async expression: async function or async arrow function
@@ -1986,7 +1986,7 @@ public sealed class Parser
 
         // Emit the static block execution
         EmitOp(OpCode.FClosure);
-        EmitU16((ushort)funcIdx);
+        EmitU32((uint)funcIdx);
         EmitOp(OpCode.CallMethod);
         EmitU16(0); // no arguments
         EmitOp(OpCode.Drop); // discard result
@@ -3851,7 +3851,7 @@ public sealed class Parser
 
         // Emit code to create the function object (closure)
         EmitOp(OpCode.FClosure);
-        EmitU16((ushort)funcIdx);
+        EmitU32((uint)funcIdx);
 
         // For function declarations, store in the variable
         if (funcType == JSParseFunctionType.Statement && !funcName.IsEmpty)

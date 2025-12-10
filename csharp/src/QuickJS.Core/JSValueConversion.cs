@@ -133,36 +133,45 @@ public static class JSValueConversion
         if (s.Equals("-Infinity", StringComparison.Ordinal))
             return double.NegativeInfinity;
 
-        // Handle hex
-        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ||
-            s.StartsWith("0X", StringComparison.OrdinalIgnoreCase))
+        // Handle hex, octal, binary prefixes (0x, 0o, 0b)
+        if (s.Length >= 2 && s[0] == '0')
         {
-            if (TryParseHex(s.Substring(2), out long hexVal))
-                return hexVal;
-            return double.NaN;
-        }
-
-        // Handle octal (legacy)
-        if (s.StartsWith("0o", StringComparison.OrdinalIgnoreCase) ||
-            s.StartsWith("0O", StringComparison.OrdinalIgnoreCase))
-        {
-            if (TryParseOctal(s.Substring(2), out long octVal))
-                return octVal;
-            return double.NaN;
-        }
-
-        // Handle binary
-        if (s.StartsWith("0b", StringComparison.OrdinalIgnoreCase) ||
-            s.StartsWith("0B", StringComparison.OrdinalIgnoreCase))
-        {
-            if (TryParseBinary(s.Substring(2), out long binVal))
-                return binVal;
-            return double.NaN;
+#if NET8_0_OR_GREATER
+            ReadOnlySpan<char> digits = s.AsSpan(2);
+            switch (s[1])
+            {
+                case 'x' or 'X':
+                    return TryParseHex(digits, out long hexVal) ? hexVal : double.NaN;
+                case 'o' or 'O':
+                    return TryParseOctal(digits, out long octVal) ? octVal : double.NaN;
+                case 'b' or 'B':
+                    return TryParseBinary(digits, out long binVal) ? binVal : double.NaN;
+            }
+#else
+            string digits = s.Substring(2);
+            switch (s[1])
+            {
+                case 'x':
+                case 'X':
+                    return TryParseHex(digits, out long hexVal) ? hexVal : double.NaN;
+                case 'o':
+                case 'O':
+                    return TryParseOctal(digits, out long octVal) ? octVal : double.NaN;
+                case 'b':
+                case 'B':
+                    return TryParseBinary(digits, out long binVal) ? binVal : double.NaN;
+            }
+#endif
         }
 
         // Parse as decimal
+#if NET8_0_OR_GREATER
+        if (double.TryParse(s.AsSpan(), NumberStyles.Float | NumberStyles.AllowThousands,
+            CultureInfo.InvariantCulture, out double result))
+#else
         if (double.TryParse(s, NumberStyles.Float | NumberStyles.AllowThousands,
             CultureInfo.InvariantCulture, out double result))
+#endif
         {
             return result;
         }
@@ -170,6 +179,60 @@ public static class JSValueConversion
         return double.NaN;
     }
 
+#if NET8_0_OR_GREATER
+    private static bool TryParseHex(ReadOnlySpan<char> s, out long result)
+    {
+        result = 0;
+        if (s.IsEmpty)
+            return false;
+
+        foreach (char c in s)
+        {
+            int digit;
+            if (c >= '0' && c <= '9')
+                digit = c - '0';
+            else if (c >= 'a' && c <= 'f')
+                digit = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F')
+                digit = c - 'A' + 10;
+            else
+                return false;
+
+            result = result * 16 + digit;
+        }
+        return true;
+    }
+
+    private static bool TryParseOctal(ReadOnlySpan<char> s, out long result)
+    {
+        result = 0;
+        if (s.IsEmpty)
+            return false;
+
+        foreach (char c in s)
+        {
+            if (c < '0' || c > '7')
+                return false;
+            result = result * 8 + (c - '0');
+        }
+        return true;
+    }
+
+    private static bool TryParseBinary(ReadOnlySpan<char> s, out long result)
+    {
+        result = 0;
+        if (s.IsEmpty)
+            return false;
+
+        foreach (char c in s)
+        {
+            if (c != '0' && c != '1')
+                return false;
+            result = result * 2 + (c - '0');
+        }
+        return true;
+    }
+#else
     private static bool TryParseHex(string s, out long result)
     {
         result = 0;
@@ -222,6 +285,7 @@ public static class JSValueConversion
         }
         return true;
     }
+#endif
 
     #endregion
 
