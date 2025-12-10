@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>QuickJS.Cli</RootNamespace>
+    
+    <!-- Assembly info -->
+    <AssemblyName>qjs</AssemblyName>
+    <Version>0.1.0</Version>
+    <Authors>QuickJS.NET Contributors</Authors>
+    <Description>QuickJS.NET command-line JavaScript interpreter and REPL</Description>
+    
+    <!-- Build settings -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    
+    <!-- Tool settings for global tool -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>qjs-net</ToolCommandName>
+    <PackageId>QuickJS.NET.Cli</PackageId>
+    <PackageTags>javascript;js;engine;cli;repl;interpreter</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\QuickJS.Core\QuickJS.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -837,13 +837,13 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 10.4: CLI Tool
+### Step 10.4: CLI Tool ✅
 **Commit**: `step-10.4-cli`  
 **Doc**: `docs/63-cli-tool.md`
 
-- [ ] Create qjs CLI equivalent
-- [ ] Implement REPL
-- [ ] Write CLI documentation
+- [x] Create qjs CLI equivalent
+- [x] Implement REPL
+- [x] Write CLI documentation
 
 ---
 
