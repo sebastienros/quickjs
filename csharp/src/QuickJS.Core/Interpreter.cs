@@ -68,6 +68,23 @@ public sealed class Interpreter
     public JSContext Context => _context;
 
     /// <summary>
+    /// Resets the interpreter state for reuse.
+    /// </summary>
+    /// <remarks>
+    /// This allows the interpreter to be reused without allocating a new stack array.
+    /// The stack is cleared and all state is reset to initial values.
+    /// </remarks>
+    public void Reset()
+    {
+        // Clear stack references to allow GC
+        Array.Clear(_stack, 0, _stackPointer);
+        _stackPointer = 0;
+        _currentFrame = null;
+        _pendingAction = PendingActionType.None;
+        _pendingValue = JSValue.Undefined;
+    }
+
+    /// <summary>
     /// Gets the current stack pointer (number of values on the stack).
     /// </summary>
     public int StackPointer => _stackPointer;

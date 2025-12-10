@@ -144,8 +144,8 @@ public static class JSEval
             return JSValue.FromObject(func);
         }
 
-        // Execute the compiled code
-        var interpreter = new Interpreter(context);
+        // Execute the compiled code using the cached interpreter
+        var interpreter = context.GetInterpreter();
         return interpreter.Execute(functionDef);
     }
 
@@ -269,7 +269,7 @@ public static class JSEval
 
         // The compiled function def is the top-level script
         // We need to execute it to get the function value
-        var interpreter = new Interpreter(context);
+        var interpreter = context.GetInterpreter();
         var result = interpreter.Execute(functionDef);
 
         if (context.HasException)

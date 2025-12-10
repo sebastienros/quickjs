@@ -110,6 +110,9 @@ public sealed class JSContext : IDisposable
     // The current stack frame (for call stack tracking)
     private JSCallFrame? _currentStackFrame;
 
+    // Cached interpreter for reuse (avoids allocating 8KB stack per evaluation)
+    private Interpreter? _cachedInterpreter;
+
     #endregion
 
     #region Constructors
@@ -5469,6 +5472,27 @@ public sealed class JSContext : IDisposable
 
         // Clear stack frames
         _currentStackFrame = null;
+    }
+
+    /// <summary>
+    /// Gets a reusable interpreter instance for this context.
+    /// </summary>
+    /// <returns>An interpreter ready for use.</returns>
+    /// <remarks>
+    /// This method reuses a cached interpreter to avoid allocating a new stack array
+    /// (8KB) on each evaluation. The interpreter is reset before being returned.
+    /// </remarks>
+    internal Interpreter GetInterpreter()
+    {
+        if (_cachedInterpreter == null)
+        {
+            _cachedInterpreter = new Interpreter(this);
+        }
+        else
+        {
+            _cachedInterpreter.Reset();
+        }
+        return _cachedInterpreter;
     }
 
     private void ThrowIfDisposed()
