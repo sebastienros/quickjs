@@ -267,6 +267,58 @@ public class LexerTests
         Assert.Equal(123L, token.Value);
     }
 
+    [Fact]
+    public void Lexer_BinaryBigIntLiteral_Parsed()
+    {
+        // Test the ParseNumericLiteral method directly
+        var parseMethod = typeof(Lexer).GetMethod("ParseNumericLiteral", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        
+        Assert.NotNull(parseMethod);
+        var parameters = parseMethod.GetParameters();
+        Assert.Equal(2, parameters.Length);
+        Assert.Equal("text", parameters[0].Name);
+        Assert.Equal("isBigInt", parameters[1].Name);
+        
+        // Call ParseNumericLiteral("0b1010", true) - without the 'n' since it's stripped before the call
+        var result1 = parseMethod!.Invoke(null, new object[] { "0b1010", true });
+        Assert.True(result1 is long, $"ParseNumericLiteral('0b1010', true) returned {result1?.GetType()?.Name ?? "null"} instead of long");
+        
+        // Call ParseNumericLiteral("0b1010n", true) - with the 'n'  
+        var result2 = parseMethod!.Invoke(null, new object[] { "0b1010n", true });
+        Assert.True(result2 is long, $"ParseNumericLiteral('0b1010n', true) returned {result2?.GetType()?.Name ?? "null"} instead of long");
+        
+        // Now test via lexer
+        var lexer = new Lexer("0b1010n");
+        var token = lexer.NextToken();
+        Assert.Equal(TokenType.Number, token.Type);
+        Assert.True(token.Text == "0b1010n", $"Expected text '0b1010n' but got '{token.Text}'");
+        var actualType = token.Value?.GetType()?.Name ?? "null";
+        var actualValue = token.Value;
+        Assert.True(token.Value is long, $"Expected long but got {actualType} with value {actualValue}, text='{token.Text}'");
+        Assert.Equal(10L, (long)token.Value!);
+    }
+
+    [Fact]
+    public void Lexer_HexBigIntLiteral_Parsed()
+    {
+        var lexer = new Lexer("0xFFn");
+        var token = lexer.NextToken();
+        Assert.Equal(TokenType.Number, token.Type);
+        Assert.Equal("0xFFn", token.Text);
+        Assert.Equal(255L, token.Value);
+    }
+
+    [Fact]
+    public void Lexer_OctalBigIntLiteral_Parsed()
+    {
+        var lexer = new Lexer("0o777n");
+        var token = lexer.NextToken();
+        Assert.Equal(TokenType.Number, token.Type);
+        Assert.Equal("0o777n", token.Text);
+        Assert.Equal(511L, token.Value);
+    }
+
     #endregion
 
     #region String Tests

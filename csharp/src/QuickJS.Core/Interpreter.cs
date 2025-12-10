@@ -3529,6 +3529,60 @@ public sealed class Interpreter
                     SetVarRef(3);
                     break;
 
+                // Short opcodes for pushing small integer constants
+                case OpCode.PushMinus1:
+                    PushI32(-1);
+                    break;
+                case OpCode.Push0:
+                    PushI32(0);
+                    break;
+                case OpCode.Push1:
+                    PushI32(1);
+                    break;
+                case OpCode.Push2:
+                    PushI32(2);
+                    break;
+                case OpCode.Push3:
+                    PushI32(3);
+                    break;
+                case OpCode.Push4:
+                    PushI32(4);
+                    break;
+                case OpCode.Push5:
+                    PushI32(5);
+                    break;
+                case OpCode.Push6:
+                    PushI32(6);
+                    break;
+                case OpCode.Push7:
+                    PushI32(7);
+                    break;
+
+                // Short opcodes for small inline integers
+                case OpCode.PushI8:
+                    {
+                        if (pc >= bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        sbyte val = unchecked((sbyte)bytecode[pc++]);
+                        PushI32(val);
+                    }
+                    break;
+                case OpCode.PushI16:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        short val = (short)(bytecode[pc] | (bytecode[pc + 1] << 8));
+                        pc += 2;
+                        PushI32(val);
+                    }
+                    break;
+
                 // u8 short opcodes
                 case OpCode.GetLoc8:
                     {

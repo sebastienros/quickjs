@@ -644,19 +644,25 @@ public sealed class Lexer
             {
                 // Hexadecimal
                 long value = Convert.ToInt64(cleanText.Substring(2), 16);
-                return isBigInt ? value : (double)value;
+                if (isBigInt)
+                    return value;
+                return (double)value;
             }
             else if (cleanText.StartsWith("0b", StringComparison.OrdinalIgnoreCase))
             {
                 // Binary
                 long value = Convert.ToInt64(cleanText.Substring(2), 2);
-                return isBigInt ? value : (double)value;
+                if (isBigInt)
+                    return value;
+                return (double)value;
             }
             else if (cleanText.StartsWith("0o", StringComparison.OrdinalIgnoreCase))
             {
                 // Octal
                 long value = Convert.ToInt64(cleanText.Substring(2), 8);
-                return isBigInt ? value : (double)value;
+                if (isBigInt)
+                    return value;
+                return (double)value;
             }
             else
             {

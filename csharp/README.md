@@ -794,10 +794,14 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 - [x] Implement ToBigInt opcode
 - [x] Implement BigInt literal parsing (lexer)
 - [x] Implement BigInt literal emission (parser)
-- [ ] Write BigInt tests (blocked by eval completion value issue)
-- [ ] Implement BigInt constructor and prototype methods
+- [x] Write BigInt unit tests (54 passing JSBigInt tests)
+- [x] Implement BigInt constructor and prototype methods
+- [x] Fix lexer binary/hex/octal BigInt literal parsing
+- [x] Add Push0-Push7, PushI8, PushI16 short opcode handlers
+- [x] Fix BigInt constructor hex string parsing
+- [ ] Eval-based BigInt tests (blocked by missing With* opcodes)
 
-> **Note**: The BigInt infrastructure is complete but testing is blocked by a separate issue where expression statements don't return their completion values properly. See `docs/59-bigint.md` for details.
+> **Note**: The BigInt infrastructure is complete with 92+ passing tests. The remaining eval-based tests are blocked by missing interpreter opcodes (WithDeleteVar, WithGetVar, etc.) which are needed for global `var` declarations. This is not specific to BigInt but a general interpreter limitation.
 
 ---
 

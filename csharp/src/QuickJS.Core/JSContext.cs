@@ -4763,7 +4763,8 @@ public sealed class JSContext : IDisposable
 
                 try
                 {
-                    var bigInt = JSBigInt.Parse(str);
+                    // Use radix 0 to auto-detect hex/octal/binary prefixes
+                    var bigInt = JSBigInt.Parse(str, 0);
                     return JSValue.FromBigInt(bigInt);
                 }
                 catch
