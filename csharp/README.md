@@ -807,13 +807,13 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ## Phase 10: Integration & Polish
 
-### Step 10.1: Public API Design
+### Step 10.1: Public API Design ✅
 **Commit**: `step-10.1-public-api`  
 **Doc**: `docs/60-public-api.md`
 
-- [ ] Design clean public API
-- [ ] Add XML documentation
-- [ ] Write API usage examples
+- [x] Design clean public API
+- [x] Add XML documentation (core types documented)
+- [x] Write API usage examples
 
 ---
 
