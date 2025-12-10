@@ -645,29 +645,31 @@ public class ParserTests
     #region Identifier Parsing
 
     [Fact]
-    public void ParseExpression_Identifier_EmitsScopeGetVar()
+    public void ParseExpression_Identifier_EmitsGlobalPropertyAccess()
     {
+        // For global vars, identifiers are accessed via PushThis + GetField
+        // since scope opcodes conflict with short opcodes
         var atoms = new AtomTable();
         var parser = new Parser("x", "test.js", atoms);
         parser.ParseExpression();
 
         var bytecode = parser.CurrentFunction.ByteCode.ToArray();
-        Assert.Contains((byte)OpCode.ScopeGetVar, bytecode);
+        Assert.Contains((byte)OpCode.PushThis, bytecode);
+        Assert.Contains((byte)OpCode.GetField, bytecode);
     }
 
     [Fact]
-    public void ParseExpression_This_EmitsScopeGetVar()
+    public void ParseExpression_This_EmitsPushThis()
     {
         var atoms = new AtomTable();
         var parser = new Parser("this", "test.js", atoms);
         parser.ParseExpression();
 
         var bytecode = parser.CurrentFunction.ByteCode.ToArray();
-        Assert.Contains((byte)OpCode.ScopeGetVar, bytecode);
+        Assert.Contains((byte)OpCode.PushThis, bytecode);
     }
 
     #endregion
-
     #region Member Access
 
     [Fact]

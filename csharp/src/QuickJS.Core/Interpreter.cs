@@ -2798,36 +2798,52 @@ public sealed class Interpreter
         if (function == null)
             throw new ArgumentNullException(nameof(function));
 
-        ReadOnlySpan<byte> bytecode = function.ByteCode.AsSpan();
-        int pc = 0;
-
-        JSValue returnValue = JSValue.Undefined;
-        bool didReturn = false;
-
-        while (pc < bytecode.Length && !HasException && !didReturn)
+        // Set up a call frame for the script execution if one doesn't already exist
+        // This is needed for GetLoc/PutLoc to work with local variables
+        // For global scripts, 'this' should be the global object
+        var savedFrame = _currentFrame;
+        bool createdFrame = false;
+        
+        if (_currentFrame == null)
         {
-            var opcode = (OpCode)bytecode[pc++];
+            var globalThis = JSValue.FromObject(_context.GlobalObject);
+            var scriptFrame = new CallFrame(function, globalThis, Array.Empty<JSValue>(), null, savedFrame, actualArgCount: 0, functionObject: null);
+            _currentFrame = scriptFrame;
+            createdFrame = true;
+        }
+        
+        try
+        {
+            ReadOnlySpan<byte> bytecode = function.ByteCode.AsSpan();
+            int pc = 0;
 
-            switch (opcode)
+            JSValue returnValue = JSValue.Undefined;
+            bool didReturn = false;
+
+            while (pc < bytecode.Length && !HasException && !didReturn)
             {
-                case OpCode.PushConst:
-                    {
-                        if (pc + 4 > bytecode.Length)
+                var opcode = (OpCode)bytecode[pc++];
+
+                switch (opcode)
+                {
+                    case OpCode.PushConst:
                         {
-                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
-                            return JSValue.Exception;
-                        }
-                        int constIdx = bytecode[pc] |
-                                       (bytecode[pc + 1] << 8) |
-                                       (bytecode[pc + 2] << 16) |
-                                       (bytecode[pc + 3] << 24);
-                        pc += 4;
-                        if (constIdx < 0 || constIdx >= function!.Constants.Count)
-                        {
-                            _context.ThrowError(JSErrorType.RangeError, "Invalid constant index");
-                            return JSValue.Exception;
-                        }
-                        Push(function.Constants.Get(constIdx));
+                            if (pc + 4 > bytecode.Length)
+                            {
+                                _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                                return JSValue.Exception;
+                            }
+                            int constIdx = bytecode[pc] |
+                                           (bytecode[pc + 1] << 8) |
+                                           (bytecode[pc + 2] << 16) |
+                                           (bytecode[pc + 3] << 24);
+                            pc += 4;
+                            if (constIdx < 0 || constIdx >= function!.Constants.Count)
+                            {
+                                _context.ThrowError(JSErrorType.RangeError, "Invalid constant index");
+                                return JSValue.Exception;
+                            }
+                            Push(function.Constants.Get(constIdx));
                     }
                     break;
 
@@ -3774,13 +3790,21 @@ public sealed class Interpreter
             }
         }
 
-        return didReturn ? returnValue : (_stackPointer > 0 ? Pop() : JSValue.Undefined);
+            return didReturn ? returnValue : (_stackPointer > 0 ? Pop() : JSValue.Undefined);
+        }
+        finally
+        {
+            // Restore the previous call frame if we created one
+            if (createdFrame)
+            {
+                _currentFrame = savedFrame;
+            }
+        }
     }
 
     #endregion
 
     #region Exception Helpers
-
     private void ThrowStackOverflow()
     {
         _context.ThrowError(JSErrorType.RangeError, "Stack overflow");

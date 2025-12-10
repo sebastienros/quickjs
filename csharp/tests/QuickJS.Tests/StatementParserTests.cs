@@ -128,9 +128,10 @@ public class StatementParserTests
         parser.ParseStatement();
 
         var bytecode = parser.CurrentFunction.ByteCode.ToArray();
-        // Should have PushI32 and ScopePutVar
+        // For top-level var, should have PushI32, PushThis, Swap, PutField (sets global property)
         Assert.Contains((byte)OpCode.PushI32, bytecode);
-        Assert.Contains((byte)OpCode.ScopePutVar, bytecode);
+        Assert.Contains((byte)OpCode.PushThis, bytecode);
+        Assert.Contains((byte)OpCode.PutField, bytecode);
     }
 
     [Fact]
@@ -152,7 +153,8 @@ public class StatementParserTests
 
         Assert.True(parser.CurrentFunction.Vars.Count > 0);
         var bytecode = parser.CurrentFunction.ByteCode.ToArray();
-        Assert.Contains((byte)OpCode.ScopePutVarInit, bytecode);
+        // Let uses local variables with PutLoc
+        Assert.Contains((byte)OpCode.PutLoc, bytecode);
     }
 
     [Fact]
@@ -164,7 +166,7 @@ public class StatementParserTests
 
         var bytecode = parser.CurrentFunction.ByteCode.ToArray();
         Assert.Contains((byte)OpCode.Undefined, bytecode);
-        Assert.Contains((byte)OpCode.ScopePutVarInit, bytecode);
+        Assert.Contains((byte)OpCode.PutLoc, bytecode);
     }
 
     [Fact]

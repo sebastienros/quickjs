@@ -69,6 +69,10 @@ public sealed class Parser
         _currentToken = _lexer.NextToken();
         _currentFunction = new JSFunctionDef();
         _isModule = isModule;
+        
+        // For global/module evaluation, var declarations should create global properties
+        // Similar to QuickJS C: fd->is_global_var = (fd->eval_type == JS_EVAL_TYPE_GLOBAL) || ...
+        _currentFunction.IsGlobalVar = true;
     }
 
     /// <summary>
@@ -2539,9 +2543,34 @@ public sealed class Parser
         var name = (string)_currentToken.Value!;
         var atom = _atoms.GetOrCreateAtom(name);
         
-        EmitOp(OpCode.ScopeGetVar);
-        EmitAtom(atom);
-        EmitU16(0); // scope level (will be resolved later)
+        // Check if this is a known local variable
+        int varIdx = _currentFunction.FindVar(atom);
+        if (varIdx >= 0)
+        {
+            // Check if this is a global var (top-level var in global scope)
+            // For global vars, read from global object property instead of local storage
+            var varDef = _currentFunction.GetVarDef(varIdx);
+            if (_currentFunction.IsGlobalVar && !varDef.IsLexical)
+            {
+                // Global var - read from global object property using PushThis + GetField
+                EmitOp(OpCode.PushThis);   // Push global object
+                EmitOp(OpCode.GetField);
+                EmitAtom(atom);
+            }
+            else
+            {
+                // Use GetLoc for local variables (avoids conflicting scope opcodes)
+                EmitOp(OpCode.GetLoc);
+                EmitU16((ushort)varIdx);
+            }
+        }
+        else
+        {
+            // Unknown variable - try to read from global object property
+            EmitOp(OpCode.PushThis);   // Push global object  
+            EmitOp(OpCode.GetField);
+            EmitAtom(atom);
+        }
     }
 
     private void ParseArrayLiteral()
@@ -2974,7 +3003,12 @@ public sealed class Parser
                 var atom = _atoms.GetOrCreateAtom(name);
                 NextToken();
 
-                // Define the variable
+                // For global var declarations (non-lexical in global scope), 
+                // set a property on the global object instead of a local variable.
+                // This matches JavaScript semantics where top-level var creates globals.
+                bool useGlobalProperty = _currentFunction.IsGlobalVar && !isLexical;
+                
+                // Still add var to track it, but we won't use local storage for global vars
                 int varIdx = _currentFunction.AddVar(atom, kind, isConst, isLexical);
 
                 if (Match(TokenType.Assign))
@@ -2982,10 +3016,22 @@ public sealed class Parser
                     // Parse initializer
                     ParseAssignExpression();
 
-                    // Store the value
-                    EmitOp(isLexical ? OpCode.ScopePutVarInit : OpCode.ScopePutVar);
-                    EmitAtom(atom);
-                    EmitU16((ushort)_currentFunction.ScopeLevel);
+                    if (useGlobalProperty)
+                    {
+                        // Stack: [value]
+                        // Get global object (this in global scope), then set property
+                        EmitOp(OpCode.PushThis);         // Stack: [value, globalThis]
+                        EmitOp(OpCode.Swap);             // Stack: [globalThis, value]
+                        EmitOp(OpCode.PutField);
+                        EmitAtom(atom);                  // Stack: [value] (SetField returns value)
+                        EmitOp(OpCode.Drop);             // Stack: []
+                    }
+                    else
+                    {
+                        // Store the value using PutLoc (direct local variable access)
+                        EmitOp(OpCode.PutLoc);
+                        EmitU16((ushort)varIdx);
+                    }
                 }
                 else if (isConst)
                 {
@@ -2997,9 +3043,18 @@ public sealed class Parser
                 {
                     // Let variables are initialized to undefined
                     EmitOp(OpCode.Undefined);
-                    EmitOp(OpCode.ScopePutVarInit);
+                    EmitOp(OpCode.PutLoc);
+                    EmitU16((ushort)varIdx);
+                }
+                else if (useGlobalProperty)
+                {
+                    // Initialize global var to undefined
+                    EmitOp(OpCode.Undefined);
+                    EmitOp(OpCode.PushThis);
+                    EmitOp(OpCode.Swap);
+                    EmitOp(OpCode.PutField);
                     EmitAtom(atom);
-                    EmitU16((ushort)_currentFunction.ScopeLevel);
+                    EmitOp(OpCode.Drop);
                 }
             }
             else

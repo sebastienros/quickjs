@@ -197,6 +197,16 @@ public sealed class JSFunctionDef
     public bool IsFuncExpr { get; set; }
 
     /// <summary>
+    /// Gets or sets whether variables should be treated as global variables.
+    /// </summary>
+    /// <remarks>
+    /// When true, top-level var declarations create properties on the global object
+    /// instead of local variables. This is true for global eval, module code,
+    /// or non-strict eval.
+    /// </remarks>
+    public bool IsGlobalVar { get; set; }
+
+    /// <summary>
     /// Gets or sets whether strict mode is enabled.
     /// </summary>
     /// <remarks>
@@ -503,6 +513,15 @@ public sealed class JSFunctionDef
         return -1;
     }
 
+    /// <summary>
+    /// Gets the variable definition at the specified index.
+    /// </summary>
+    /// <param name="index">The variable index.</param>
+    /// <returns>The variable definition.</returns>
+    public JSVarDef GetVarDef(int index)
+    {
+        return Vars[index];
+    }
     /// <summary>
     /// Finds an argument by name.
     /// </summary>
