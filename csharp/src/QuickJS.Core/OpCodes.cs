@@ -14,6 +14,7 @@ public static class OpCodes
 {
     private static readonly OpCodeInfo[] _info;
     private static readonly Dictionary<string, OpCodeInfo> _byName;
+    private static readonly Dictionary<OpCode, OpCodeInfo> _byOpCode;
 
     static OpCodes()
     {
@@ -320,11 +321,13 @@ public static class OpCodes
         // Build lookup arrays - use 512 to accommodate all opcodes including temporary and short ones
         _info = new OpCodeInfo[512];
         _byName = new Dictionary<string, OpCodeInfo>(infos.Length, StringComparer.OrdinalIgnoreCase);
+        _byOpCode = new Dictionary<OpCode, OpCodeInfo>(infos.Length);
 
         foreach (var info in infos)
         {
             _info[(int)info.OpCode] = info;
             _byName[info.Name] = info;
+            _byOpCode[info.OpCode] = info;
         }
     }
 
@@ -333,7 +336,13 @@ public static class OpCodes
     /// </summary>
     /// <param name="opCode">The opcode to look up.</param>
     /// <returns>The opcode metadata.</returns>
-    public static OpCodeInfo GetInfo(OpCode opCode) => _info[(int)opCode];
+    public static OpCodeInfo GetInfo(OpCode opCode)
+    {
+        // Use dictionary lookup to handle overlapping temporary/short opcode values
+        if (_byOpCode.TryGetValue(opCode, out var info))
+            return info;
+        return _info[(int)opCode];
+    }
 
     /// <summary>
     /// Gets the metadata for an opcode by name.

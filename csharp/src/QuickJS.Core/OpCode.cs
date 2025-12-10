@@ -674,10 +674,14 @@ public enum OpCode : ushort
 
     // ========================================
     // Short opcodes (optimization for common cases)
+    // These start at value 178 to overlap with temporary opcodes,
+    // since temporary opcodes are only used during compilation
+    // and are never present in final bytecode. Nop (177) is the
+    // last non-temporary opcode that needs to be in final bytecode.
     // ========================================
 
     /// <summary>Push -1.</summary>
-    PushMinus1,
+    PushMinus1 = 178,
 
     /// <summary>Push 0.</summary>
     Push0,

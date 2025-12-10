@@ -176,6 +176,32 @@ QuickJS uses temporary opcodes during compilation that are resolved in later pha
 | Phase 3 | Resolve labels → convert to absolute jump offsets |
 | Final | Only final opcodes remain in the bytecode |
 
+### Value Range Overlap
+
+Temporary opcodes and short opcodes **share the same value range** (starting at 178). This is intentional because they are mutually exclusive:
+
+- **Temporary opcodes** are only used during compilation and are never present in final bytecode
+- **Short opcodes** are optimizations that only appear in final bytecode
+
+This design keeps all final opcodes within 256 values (0-255), allowing them to fit in a single byte for efficient bytecode encoding. The `EmitOp` method emits opcodes as single bytes.
+
+```csharp
+// In OpCode.cs:
+Nop = 177,           // Last non-temporary opcode
+
+// Temporary opcodes (used during compilation only)
+EnterScope,          // = 178 (same range as short opcodes)
+LeaveScope,
+Label,
+// ... more temporary opcodes
+
+// Short opcodes (in final bytecode, same range)
+PushMinus1 = 178,    // Explicitly starts at 178
+Push0,               // = 179
+Push1,               // = 180
+// ... more short opcodes
+```
+
 ## Short Opcodes
 
 Optimizations for common cases (reduces bytecode size):

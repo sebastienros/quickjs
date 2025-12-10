@@ -246,19 +246,22 @@ public class OpCodeTests
 
     // ========================================
     // Temporary opcodes
+    // Note: Temporary opcodes overlap with short opcodes (they share the same
+    // value range since they're mutually exclusive - temporary opcodes are
+    // only used during compilation). We look up by name instead of value.
     // ========================================
 
     [Theory]
-    [InlineData(OpCode.EnterScope)]
-    [InlineData(OpCode.LeaveScope)]
-    [InlineData(OpCode.Label)]
-    [InlineData(OpCode.ScopeGetVar)]
-    [InlineData(OpCode.ScopePutVar)]
-    [InlineData(OpCode.LineNum)]
-    public void TemporaryOpcodes_AreMarkedAsTemporary(OpCode opCode)
+    [InlineData("enter_scope")]
+    [InlineData("leave_scope")]
+    [InlineData("label")]
+    [InlineData("scope_get_var")]
+    [InlineData("scope_put_var")]
+    [InlineData("line_num")]
+    public void TemporaryOpcodes_AreMarkedAsTemporary(string opCodeName)
     {
-        var info = OpCodes.GetInfo(opCode);
-        Assert.True(info.IsTemporary);
+        Assert.True(OpCodes.TryGetByName(opCodeName, out var info), $"OpCode '{opCodeName}' not found");
+        Assert.True(info.IsTemporary, $"OpCode '{opCodeName}' should be marked as temporary");
     }
 
     [Theory]
