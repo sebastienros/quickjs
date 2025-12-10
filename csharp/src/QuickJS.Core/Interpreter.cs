@@ -2781,7 +2781,7 @@ public sealed class Interpreter
         if (function == null)
             throw new ArgumentNullException(nameof(function));
 
-        var bytecode = function.ByteCode.ToArray();
+        ReadOnlySpan<byte> bytecode = function.ByteCode.AsSpan();
         int pc = 0;
 
         JSValue returnValue = JSValue.Undefined;

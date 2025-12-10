@@ -469,7 +469,7 @@ public sealed class JSGenerator : JSObject
             return (JSValue.Exception, GeneratorReturnType.Exception);
         }
 
-        var bytecode = _funcState.FunctionDef.ByteCode.ToArray();
+        var bytecode = _funcState.FunctionDef.ByteCode.AsSpan();
         int pc = _funcState.ProgramCounter;
 
         // If resuming from yield, the send value replaces the yield result
@@ -902,7 +902,7 @@ public sealed class JSGenerator : JSObject
 
     #region Bytecode Reading Helpers
 
-    private static int ReadI32(byte[] bytecode, ref int pc)
+    private static int ReadI32(ReadOnlySpan<byte> bytecode, ref int pc)
     {
         int value = bytecode[pc] |
                     (bytecode[pc + 1] << 8) |
@@ -912,14 +912,14 @@ public sealed class JSGenerator : JSObject
         return value;
     }
 
-    private static ushort ReadU16(byte[] bytecode, ref int pc)
+    private static ushort ReadU16(ReadOnlySpan<byte> bytecode, ref int pc)
     {
         ushort value = (ushort)(bytecode[pc] | (bytecode[pc + 1] << 8));
         pc += 2;
         return value;
     }
 
-    private static short ReadI16(byte[] bytecode, ref int pc)
+    private static short ReadI16(ReadOnlySpan<byte> bytecode, ref int pc)
     {
         short value = (short)(bytecode[pc] | (bytecode[pc + 1] << 8));
         pc += 2;
