@@ -4,7 +4,6 @@ using BenchmarkDotNet.Jobs;
 namespace QuickJS.Benchmarks;
 
 [MemoryDiagnoser]
-[SimpleJob(RuntimeMoniker.Net80)]
 public class EngineComparisonBenchmarks
 {
     private JSRuntime _quickJsRuntime = null!;

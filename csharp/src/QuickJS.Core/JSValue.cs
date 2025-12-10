@@ -91,35 +91,89 @@ public readonly struct JSValue : IEquatable<JSValue>
 
     #region Static Factory Methods
 
+    // Backing fields for ref readonly returns
+    private static readonly JSValue s_undefined = new(JSValueType.Undefined);
+    private static readonly JSValue s_null = new(JSValueType.Null);
+    private static readonly JSValue s_true = new(JSValueType.Bool, 1);
+    private static readonly JSValue s_false = new(JSValueType.Bool, 0);
+    private static readonly JSValue s_exception = new(JSValueType.Exception);
+    private static readonly JSValue s_uninitialized = new(JSValueType.Uninitialized);
+    private static readonly JSValue s_emptyString = new(JSValueType.String, string.Empty);
+
+    // Cache for small integers (0-255) - commonly used for array indices, loop counters, etc.
+    private const int SmallIntCacheMin = 0;
+    private const int SmallIntCacheMax = 255;
+    private static readonly JSValue[] s_smallIntCache = CreateSmallIntCache();
+
+    private static JSValue[] CreateSmallIntCache()
+    {
+        var cache = new JSValue[SmallIntCacheMax - SmallIntCacheMin + 1];
+        for (int i = SmallIntCacheMin; i <= SmallIntCacheMax; i++)
+        {
+            cache[i - SmallIntCacheMin] = new JSValue(JSValueType.Int, i);
+        }
+        return cache;
+    }
+
     /// <summary>
     /// The JavaScript <c>undefined</c> value.
     /// </summary>
-    public static JSValue Undefined { get; } = new(JSValueType.Undefined);
+    public static ref readonly JSValue Undefined => ref s_undefined;
 
     /// <summary>
     /// The JavaScript <c>null</c> value.
     /// </summary>
-    public static JSValue Null { get; } = new(JSValueType.Null);
+    public static ref readonly JSValue Null => ref s_null;
 
     /// <summary>
     /// The JavaScript <c>true</c> value.
     /// </summary>
-    public static JSValue True { get; } = new(JSValueType.Bool, 1);
+    public static ref readonly JSValue True => ref s_true;
 
     /// <summary>
     /// The JavaScript <c>false</c> value.
     /// </summary>
-    public static JSValue False { get; } = new(JSValueType.Bool, 0);
+    public static ref readonly JSValue False => ref s_false;
 
     /// <summary>
     /// A special value indicating an exception was thrown.
     /// </summary>
-    public static JSValue Exception { get; } = new(JSValueType.Exception);
+    public static ref readonly JSValue Exception => ref s_exception;
 
     /// <summary>
     /// A special value indicating an uninitialized variable.
     /// </summary>
-    internal static JSValue Uninitialized { get; } = new(JSValueType.Uninitialized);
+    internal static ref readonly JSValue Uninitialized => ref s_uninitialized;
+
+    /// <summary>
+    /// The JavaScript empty string value.
+    /// </summary>
+    public static ref readonly JSValue EmptyString => ref s_emptyString;
+
+    /// <summary>
+    /// The JavaScript number zero.
+    /// </summary>
+    public static ref readonly JSValue Zero => ref s_smallIntCache[0];
+
+    /// <summary>
+    /// The JavaScript number one.
+    /// </summary>
+    public static ref readonly JSValue One => ref s_smallIntCache[1];
+
+    /// <summary>
+    /// Gets a cached small integer by ref if available.
+    /// </summary>
+    /// <param name="value">The integer value (must be 0-255).</param>
+    /// <returns>A ref readonly to the cached JSValue.</returns>
+    /// <remarks>
+    /// This is an internal optimization for hot paths. Caller must ensure value is in range 0-255.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static ref readonly JSValue GetCachedInt32(int value)
+    {
+        Debug.Assert((uint)value <= SmallIntCacheMax, "Value must be in cached range 0-255");
+        return ref s_smallIntCache[value];
+    }
 
     /// <summary>
     /// Creates a JavaScript boolean value.
@@ -135,7 +189,15 @@ public readonly struct JSValue : IEquatable<JSValue>
     /// <param name="value">The integer value.</param>
     /// <returns>A JSValue representing the integer.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static JSValue FromInt32(int value) => new(JSValueType.Int, value);
+    public static JSValue FromInt32(int value)
+    {
+        // Return cached value for small integers (0-255)
+        if ((uint)value <= SmallIntCacheMax)
+        {
+            return s_smallIntCache[value];
+        }
+        return new JSValue(JSValueType.Int, value);
+    }
 
     /// <summary>
     /// Creates a JavaScript number from a 64-bit floating-point value.
@@ -157,6 +219,11 @@ public readonly struct JSValue : IEquatable<JSValue>
             int intVal = (int)value;
             if ((double)intVal == value && !IsNegativeZero(value))
             {
+                // Use cached value for small integers (0-255)
+                if ((uint)intVal <= SmallIntCacheMax)
+                {
+                    return s_smallIntCache[intVal];
+                }
                 return new JSValue(JSValueType.Int, intVal);
             }
         }
@@ -187,6 +254,12 @@ public readonly struct JSValue : IEquatable<JSValue>
         if (value is null)
         {
             ThrowArgumentNull(nameof(value));
+        }
+
+        // Return cached empty string
+        if (value.Length == 0)
+        {
+            return s_emptyString;
         }
 
         return new JSValue(JSValueType.String, value);

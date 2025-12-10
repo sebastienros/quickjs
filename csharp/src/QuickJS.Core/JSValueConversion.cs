@@ -33,7 +33,7 @@ public static class JSValueConversion
     /// JavaScript falsy values: undefined, null, false, 0, -0, NaN, ""
     /// Everything else is truthy.
     /// </remarks>
-    public static bool ToBoolean(JSValue value)
+    public static bool ToBoolean(in JSValue value)
     {
         return value.ToBoolean();
     }
@@ -57,7 +57,7 @@ public static class JSValueConversion
     /// <item>Object → ToPrimitive then ToNumber</item>
     /// </list>
     /// </remarks>
-    public static double ToNumber(JSValue value)
+    public static double ToNumber(in JSValue value)
     {
         switch (value.Tag)
         {
@@ -296,7 +296,7 @@ public static class JSValueConversion
     /// </summary>
     /// <param name="value">The value to convert.</param>
     /// <returns>The integer result (as double, may be large).</returns>
-    public static double ToInteger(JSValue value)
+    public static double ToInteger(in JSValue value)
     {
         double number = ToNumber(value);
 
@@ -321,7 +321,7 @@ public static class JSValueConversion
     /// <remarks>
     /// This performs modulo 2^32 conversion as specified by ECMAScript.
     /// </remarks>
-    public static int ToInt32(JSValue value)
+    public static int ToInt32(in JSValue value)
     {
         double number = ToNumber(value);
 
@@ -352,7 +352,7 @@ public static class JSValueConversion
     /// </summary>
     /// <param name="value">The value to convert.</param>
     /// <returns>The 32-bit unsigned integer result.</returns>
-    public static uint ToUInt32(JSValue value)
+    public static uint ToUInt32(in JSValue value)
     {
         double number = ToNumber(value);
 
@@ -377,7 +377,7 @@ public static class JSValueConversion
     /// </summary>
     /// <param name="value">The value to convert.</param>
     /// <returns>The 16-bit unsigned integer result.</returns>
-    public static ushort ToUInt16(JSValue value)
+    public static ushort ToUInt16(in JSValue value)
     {
         double number = ToNumber(value);
 
@@ -402,7 +402,7 @@ public static class JSValueConversion
     /// </summary>
     /// <param name="value">The value to convert.</param>
     /// <returns>The string result.</returns>
-    public static string ToString(JSValue value)
+    public static string ToString(in JSValue value)
     {
         if (value.Tag == JSValueType.Object && value.TryGetObject(out var obj))
         {
@@ -449,7 +449,7 @@ public static class JSValueConversion
     /// </summary>
     /// <param name="value">The value to check.</param>
     /// <returns>The typeof string.</returns>
-    public static string TypeOf(JSValue value)
+    public static string TypeOf(in JSValue value)
     {
         return value.Tag switch
         {
@@ -470,7 +470,7 @@ public static class JSValueConversion
     /// </summary>
     /// <param name="value">The value to check.</param>
     /// <returns>True if the value is callable.</returns>
-    public static bool IsCallable(JSValue value)
+    public static bool IsCallable(in JSValue value)
     {
         if (!value.IsObject)
             return false;
@@ -483,7 +483,7 @@ public static class JSValueConversion
     /// </summary>
     /// <param name="value">The value to check.</param>
     /// <returns>True if the value is a constructor.</returns>
-    public static bool IsConstructor(JSValue value)
+    public static bool IsConstructor(in JSValue value)
     {
         if (!value.IsObject)
             return false;
@@ -509,7 +509,7 @@ public static class JSValueConversion
     /// - SameValue(NaN, NaN) is true
     /// - SameValue(+0, -0) is false
     /// </remarks>
-    public static bool SameValue(JSValue x, JSValue y)
+    public static bool SameValue(in JSValue x, in JSValue y)
     {
         // Different types
         if (x.Tag != y.Tag)
@@ -577,7 +577,7 @@ public static class JSValueConversion
     /// <param name="x">First value.</param>
     /// <param name="y">Second value.</param>
     /// <returns>True if the values are the same (treating +0 and -0 as equal).</returns>
-    public static bool SameValueZero(JSValue x, JSValue y)
+    public static bool SameValueZero(in JSValue x, in JSValue y)
     {
         if (x.Tag != y.Tag)
         {
@@ -608,7 +608,7 @@ public static class JSValueConversion
     /// <param name="x">First value.</param>
     /// <param name="y">Second value.</param>
     /// <returns>True if the values are strictly equal.</returns>
-    public static bool StrictEquals(JSValue x, JSValue y)
+    public static bool StrictEquals(in JSValue x, in JSValue y)
     {
         // Different types are never strictly equal (except Int and Float64 which are both numbers)
         if (x.Tag != y.Tag)

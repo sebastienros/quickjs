@@ -71,7 +71,9 @@ public class SymbolTests : IDisposable
     {
         var sym = new JSSymbol("test");
         Assert.True(sym.Equals(sym));
+#pragma warning disable CS1718 // Intentional: testing that == operator works correctly with same variable
         Assert.True(sym == sym);
+#pragma warning restore CS1718
     }
 
     #endregion

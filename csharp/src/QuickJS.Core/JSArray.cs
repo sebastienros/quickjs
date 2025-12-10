@@ -757,7 +757,7 @@ public class JSArray : JSObject, IEnumerable<JSValue>
     /// <summary>
     /// Implements the SameValueZero comparison (used by includes).
     /// </summary>
-    private static bool SameValueZero(JSValue x, JSValue y)
+    private static bool SameValueZero(in JSValue x, in JSValue y)
     {
         if (x.Tag != y.Tag)
             return false;

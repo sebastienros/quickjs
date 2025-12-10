@@ -353,7 +353,7 @@ public class JSFunction : JSObject
     /// <param name="index">The index in the closure variable array.</param>
     /// <param name="value">The value to set.</param>
     /// <returns><c>true</c> if the value was set; <c>false</c> if the index is invalid or the variable is const.</returns>
-    public bool SetClosureValue(int index, JSValue value)
+    public bool SetClosureValue(int index, in JSValue value)
     {
         var varRef = GetVarRef(index);
         if (varRef != null)
@@ -372,7 +372,7 @@ public class JSFunction : JSObject
     /// </summary>
     /// <param name="thisArg">The value to use as <c>this</c> when calling the function.</param>
     /// <returns>A new bound function.</returns>
-    public JSFunction Bind(JSValue thisArg)
+    public JSFunction Bind(in JSValue thisArg)
     {
         return Bind(thisArg, null);
     }
@@ -383,7 +383,7 @@ public class JSFunction : JSObject
     /// <param name="thisArg">The value to use as <c>this</c> when calling the function.</param>
     /// <param name="boundArgs">Arguments to prepend to each call.</param>
     /// <returns>A new bound function.</returns>
-    public JSFunction Bind(JSValue thisArg, params JSValue[]? boundArgs)
+    public JSFunction Bind(in JSValue thisArg, params JSValue[]? boundArgs)
     {
         // If this is already a bound function, we bind to the underlying target
         // but combine the bound this and args

@@ -325,7 +325,7 @@ public sealed class JSGenerator : JSObject
     /// <remarks>
     /// Based on js_generator_next from QuickJS (quickjs.c lines 20481-20556).
     /// </remarks>
-    private JSValue Resume(JSValue arg, int magic)
+    private JSValue Resume(in JSValue arg, int magic)
     {
         bool done = true;
         JSValue result;
@@ -414,7 +414,7 @@ public sealed class JSGenerator : JSObject
     /// <summary>
     /// Executes the generator until the next yield or completion.
     /// </summary>
-    private JSValue ExecuteGenerator(JSValue sendValue, bool useSendValue)
+    private JSValue ExecuteGenerator(in JSValue sendValue, bool useSendValue)
     {
         if (_funcState == null)
             return JSValue.Undefined;
@@ -455,7 +455,7 @@ public sealed class JSGenerator : JSObject
     /// <summary>
     /// Executes generator bytecode until yield or completion.
     /// </summary>
-    private (JSValue Value, GeneratorReturnType ReturnType) ExecuteGeneratorBytecode(JSValue sendValue, bool useSendValue)
+    private (JSValue Value, GeneratorReturnType ReturnType) ExecuteGeneratorBytecode(in JSValue sendValue, bool useSendValue)
     {
         if (_funcState == null)
             return (JSValue.Undefined, GeneratorReturnType.Return);
@@ -538,11 +538,11 @@ public sealed class JSGenerator : JSObject
                     break;
 
                 case OpCode.Push0:
-                    PushStack(JSValue.FromInt32(0));
+                    PushStack(JSValue.Zero);
                     break;
 
                 case OpCode.Push1:
-                    PushStack(JSValue.FromInt32(1));
+                    PushStack(JSValue.One);
                     break;
 
                 case OpCode.PushMinus1:
@@ -874,7 +874,7 @@ public sealed class JSGenerator : JSObject
 
     #region Stack Helpers
 
-    private void PushStack(JSValue value)
+    private void PushStack(in JSValue value)
     {
         _funcState!.Stack.Add(value);
     }
@@ -929,7 +929,7 @@ public sealed class JSGenerator : JSObject
     /// <summary>
     /// Simplified abstract equality comparison.
     /// </summary>
-    private static bool AbstractEquality(JSValue x, JSValue y)
+    private static bool AbstractEquality(in JSValue x, in JSValue y)
     {
         // Same type - use strict equality
         if (x.Tag == y.Tag)
@@ -981,7 +981,7 @@ public sealed class JSGenerator : JSObject
     /// <summary>
     /// Creates an iterator result object {value, done}.
     /// </summary>
-    private JSValue CreateIteratorResult(JSValue value, bool done)
+    private JSValue CreateIteratorResult(in JSValue value, bool done)
     {
         var result = new JSObject(_context.GetClassPrototype(JSClassId.Object), JSClassId.Object);
         result.Set("value", value);

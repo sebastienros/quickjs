@@ -1408,7 +1408,7 @@ public sealed class JSContext : IDisposable
             var str = GetStringValue(thisVal);
             int index = args.Length > 0 ? args[0].ToInt32() : 0;
             if (index < 0 || index >= str.Length)
-                return JSValue.FromString("");
+                return JSValue.EmptyString;
             return JSValue.FromString(str[index].ToString());
         }
 
@@ -1502,7 +1502,7 @@ public sealed class JSContext : IDisposable
             if (end < 0) end = Math.Max(len + end, 0);
             start = Math.Min(start, len);
             end = Math.Min(end, len);
-            if (end <= start) return JSValue.FromString("");
+            if (end <= start) return JSValue.EmptyString;
             return JSValue.FromString(str.Substring(start, end - start));
         }
 
@@ -1527,7 +1527,7 @@ public sealed class JSContext : IDisposable
             int start = args.Length > 0 ? args[0].ToInt32() : 0;
             if (start < 0) start = Math.Max(len + start, 0);
             int length = args.Length > 1 && !args[1].IsUndefined ? args[1].ToInt32() : len - start;
-            if (length <= 0 || start >= len) return JSValue.FromString("");
+            if (length <= 0 || start >= len) return JSValue.EmptyString;
             length = Math.Min(length, len - start);
             return JSValue.FromString(str.Substring(start, length));
         }
@@ -1612,7 +1612,7 @@ public sealed class JSContext : IDisposable
             if (count < 0)
                 return ThrowRangeError("Invalid count value");
             if (count == 0 || str.Length == 0)
-                return JSValue.FromString("");
+                return JSValue.EmptyString;
             return JSValue.FromString(string.Concat(Enumerable.Repeat(str, count)));
         }
 
@@ -2381,7 +2381,7 @@ public sealed class JSContext : IDisposable
             obj.Set("global", JSValue.FromBoolean(global));
             obj.Set("ignoreCase", JSValue.FromBoolean(ignoreCase));
             obj.Set("multiline", JSValue.FromBoolean(multiline));
-            obj.Set("lastIndex", JSValue.FromInt32(0));
+            obj.Set("lastIndex", JSValue.Zero);
             return JSValue.FromObject(obj);
         }
 
@@ -2409,7 +2409,7 @@ public sealed class JSContext : IDisposable
             if (match == null || !match.Success)
             {
                 if (global)
-                    obj.Set("lastIndex", JSValue.FromInt32(0));
+                    obj.Set("lastIndex", JSValue.Zero);
                 return JSValue.Null;
             }
 
@@ -2532,7 +2532,7 @@ public sealed class JSContext : IDisposable
         }
     }
 
-    private static object? ToJsonCompatible(JSValue value)
+    private static object? ToJsonCompatible(in JSValue value)
     {
         switch (value.Tag)
         {
@@ -5291,13 +5291,13 @@ public sealed class JSContext : IDisposable
         {
             if (args.Length < 1 || !IsFunction(args[0]))
             {
-                return JSValue.FromInt32(0);
+                return JSValue.Zero;
             }
 
             var callback = args[0].AsObject() as JSFunction;
             if (callback == null)
             {
-                return JSValue.FromInt32(0);
+                return JSValue.Zero;
             }
 
             var delay = args.Length > 1 ? args[1].ToInt32() : 0;
@@ -5323,13 +5323,13 @@ public sealed class JSContext : IDisposable
         {
             if (args.Length < 1 || !IsFunction(args[0]))
             {
-                return JSValue.FromInt32(0);
+                return JSValue.Zero;
             }
 
             var callback = args[0].AsObject() as JSFunction;
             if (callback == null)
             {
-                return JSValue.FromInt32(0);
+                return JSValue.Zero;
             }
 
             var delay = args.Length > 1 ? args[1].ToInt32() : 0;

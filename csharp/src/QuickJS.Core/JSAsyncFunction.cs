@@ -144,7 +144,7 @@ public sealed class JSAsyncFunctionExecutor : JSObject
     /// </summary>
     /// <param name="value">The value to resume with (await result or thrown value).</param>
     /// <param name="isThrow">Whether to throw the value.</param>
-    internal void Resume(JSValue value, bool isThrow)
+    internal void Resume(in JSValue value, bool isThrow)
     {
         if (_generator == null || _state == AsyncFunctionState.Completed)
             return;
@@ -215,7 +215,7 @@ public sealed class JSAsyncFunctionExecutor : JSObject
     /// <summary>
     /// Sets up resumption when the awaited promise settles.
     /// </summary>
-    private void SetupAwaitResume(JSValue awaitValue)
+    private void SetupAwaitResume(in JSValue awaitValue)
     {
         var functionProto = _context.GetClassPrototype(JSClassId.CFunction);
         var interpreter = new Interpreter(_context);
@@ -286,7 +286,7 @@ public sealed class JSAsyncFunctionExecutor : JSObject
     /// <summary>
     /// Calls the resolve function.
     /// </summary>
-    private void CallResolve(JSValue value)
+    private void CallResolve(in JSValue value)
     {
         if (!_resolveFunc.IsObject)
             return;
@@ -298,7 +298,7 @@ public sealed class JSAsyncFunctionExecutor : JSObject
     /// <summary>
     /// Calls the reject function.
     /// </summary>
-    private void CallReject(JSValue value)
+    private void CallReject(in JSValue value)
     {
         if (!_rejectFunc.IsObject)
             return;

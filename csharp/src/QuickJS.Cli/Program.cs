@@ -184,7 +184,7 @@ Type '.help' for help, '.exit' to quit
         }
     }
 
-    private static string FormatValue(JSValue value)
+    private static string FormatValue(in JSValue value)
     {
         if (value.IsString)
         {

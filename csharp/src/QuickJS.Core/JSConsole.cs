@@ -155,7 +155,7 @@ public class JSConsole : JSObject
         return sb.ToString();
     }
 
-    private static string FormatValue(JSValue value)
+    private static string FormatValue(in JSValue value)
     {
         if (value.IsUndefined)
             return "undefined";

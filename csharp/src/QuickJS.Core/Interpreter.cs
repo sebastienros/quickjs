@@ -252,7 +252,7 @@ public sealed class Interpreter
     /// </summary>
     /// <param name="value">The value to push.</param>
     /// <exception cref="JSException">Thrown when the stack overflows.</exception>
-    public void Push(JSValue value)
+    public void Push(in JSValue value)
     {
         if (_stackPointer >= _maxStackSize)
         {
@@ -625,7 +625,7 @@ public sealed class Interpreter
         AddSlow(op1, op2);
     }
 
-    private void AddSlow(JSValue op1, JSValue op2)
+    private void AddSlow(in JSValue op1, in JSValue op2)
     {
         // ToPrimitive hint: default (number for most, string for Date)
         var prim1 = ToPrimitive(op1);
@@ -1095,7 +1095,7 @@ public sealed class Interpreter
     /// <summary>
     /// Gets the JavaScript typeof string for a value.
     /// </summary>
-    private static string GetTypeOfString(JSValue val)
+    private static string GetTypeOfString(in JSValue val)
     {
         if (val.IsUndefined)
             return "undefined";
@@ -1506,7 +1506,7 @@ public sealed class Interpreter
     /// Abstract relational comparison as per ECMAScript spec.
     /// Returns null for undefined result (NaN comparisons).
     /// </summary>
-    private JSValue? AbstractRelationalComparison(JSValue x, JSValue y, bool leftFirst)
+    private JSValue? AbstractRelationalComparison(in JSValue x, in JSValue y, bool leftFirst)
     {
         JSValue px, py;
 
@@ -1671,7 +1671,7 @@ public sealed class Interpreter
     /// <summary>
     /// Abstract equality comparison as per ECMAScript spec (==).
     /// </summary>
-    private bool AbstractEqualityComparison(JSValue x, JSValue y)
+    private bool AbstractEqualityComparison(in JSValue x, in JSValue y)
     {
         // Same type - use strict comparison
         if (x.Tag == y.Tag)
@@ -1757,7 +1757,7 @@ public sealed class Interpreter
     /// <summary>
     /// Strict equality comparison as per ECMAScript spec (===).
     /// </summary>
-    private bool StrictEqualityComparison(JSValue x, JSValue y)
+    private bool StrictEqualityComparison(in JSValue x, in JSValue y)
     {
         // Different types are never strictly equal
         if (x.Tag != y.Tag)
@@ -2306,7 +2306,7 @@ public sealed class Interpreter
     /// <summary>
     /// Gets a property value from an object.
     /// </summary>
-    private JSValue GetPropertyValue(JSValue obj, string propertyName)
+    private JSValue GetPropertyValue(in JSValue obj, string propertyName)
     {
         // Handle null/undefined
         if (obj.IsNull || obj.IsUndefined)
@@ -2332,7 +2332,7 @@ public sealed class Interpreter
             {
                 return JSValue.FromInt32(str.Length);
             }
-            return JSValue.FromInt32(0);
+            return JSValue.Zero;
         }
 
         // String index access
@@ -2352,7 +2352,7 @@ public sealed class Interpreter
     /// <summary>
     /// Sets a property value on an object.
     /// </summary>
-    private void SetPropertyValue(JSValue obj, string propertyName, JSValue value)
+    private void SetPropertyValue(in JSValue obj, string propertyName, in JSValue value)
     {
         // Handle null/undefined
         if (obj.IsNull || obj.IsUndefined)
@@ -2378,7 +2378,7 @@ public sealed class Interpreter
     /// <summary>
     /// Gets an element by index from an object or array.
     /// </summary>
-    private JSValue GetElementValue(JSValue obj, JSValue index)
+    private JSValue GetElementValue(in JSValue obj, in JSValue index)
     {
         // Handle null/undefined
         if (obj.IsNull || obj.IsUndefined)
@@ -2445,7 +2445,7 @@ public sealed class Interpreter
     /// <summary>
     /// Sets an element by index on an object or array.
     /// </summary>
-    private void SetElementValue(JSValue obj, JSValue index, JSValue value)
+    private void SetElementValue(in JSValue obj, in JSValue index, in JSValue value)
     {
         // Handle null/undefined
         if (obj.IsNull || obj.IsUndefined)
@@ -2563,7 +2563,7 @@ public sealed class Interpreter
     /// <param name="value">The value to convert.</param>
     /// <param name="preferredType">The preferred type hint ("string" or "number").</param>
     /// <returns>The primitive value.</returns>
-    private JSValue ToPrimitive(JSValue value, string? preferredType = null)
+    private JSValue ToPrimitive(in JSValue value, string? preferredType = null)
     {
         if (!value.IsObject)
             return value;
@@ -3551,28 +3551,28 @@ public sealed class Interpreter
                     PushI32(-1);
                     break;
                 case OpCode.Push0:
-                    PushI32(0);
+                    Push(in JSValue.GetCachedInt32(0));
                     break;
                 case OpCode.Push1:
-                    PushI32(1);
+                    Push(in JSValue.GetCachedInt32(1));
                     break;
                 case OpCode.Push2:
-                    PushI32(2);
+                    Push(in JSValue.GetCachedInt32(2));
                     break;
                 case OpCode.Push3:
-                    PushI32(3);
+                    Push(in JSValue.GetCachedInt32(3));
                     break;
                 case OpCode.Push4:
-                    PushI32(4);
+                    Push(in JSValue.GetCachedInt32(4));
                     break;
                 case OpCode.Push5:
-                    PushI32(5);
+                    Push(in JSValue.GetCachedInt32(5));
                     break;
                 case OpCode.Push6:
-                    PushI32(6);
+                    Push(in JSValue.GetCachedInt32(6));
                     break;
                 case OpCode.Push7:
-                    PushI32(7);
+                    Push(in JSValue.GetCachedInt32(7));
                     break;
 
                 // Short opcodes for small inline integers

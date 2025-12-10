@@ -323,13 +323,13 @@ Tips:
         }
     }
 
-    private void PrintResult(JSValue value)
+    private void PrintResult(in JSValue value)
     {
         var formatted = FormatValue(value);
         Console.WriteLine(formatted);
     }
 
-    private string FormatValue(JSValue value)
+    private string FormatValue(in JSValue value)
     {
         if (value.IsUndefined)
         {
