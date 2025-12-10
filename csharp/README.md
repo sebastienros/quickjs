@@ -817,13 +817,13 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 10.2: C# Interop
+### Step 10.2: C# Interop ✅
 **Commit**: `step-10.2-interop`  
 **Doc**: `docs/61-csharp-interop.md`
 
-- [ ] Expose C# objects to JavaScript
-- [ ] Call C# methods from JavaScript
-- [ ] Write interop examples
+- [x] Expose C# objects to JavaScript
+- [x] Call C# methods from JavaScript
+- [x] Write interop examples
 
 ---
 
