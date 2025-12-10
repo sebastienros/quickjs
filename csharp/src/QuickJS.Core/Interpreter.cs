@@ -309,6 +309,17 @@ public sealed class Interpreter
     }
 
     /// <summary>
+    /// Checks if the top stack value is not an exception.
+    /// </summary>
+    /// <returns>True if no exception, false if there is an exception on stack top.</returns>
+    private bool CheckStackTopNotException()
+    {
+        if (_stackPointer > 0 && _stack[_stackPointer - 1].IsException)
+            return false;
+        return true;
+    }
+
+    /// <summary>
     /// Drops the top value from the stack (OP_drop).
     /// </summary>
     public void Drop()
@@ -2650,22 +2661,22 @@ public sealed class Interpreter
             // Arithmetic
             case OpCode.Add:
                 Add();
-                return true;
+                return CheckStackTopNotException();
             case OpCode.Sub:
                 Sub();
-                return true;
+                return CheckStackTopNotException();
             case OpCode.Mul:
                 Mul();
-                return true;
+                return CheckStackTopNotException();
             case OpCode.Div:
                 Div();
-                return true;
+                return CheckStackTopNotException();
             case OpCode.Mod:
                 Mod();
-                return true;
+                return CheckStackTopNotException();
             case OpCode.Pow:
                 Pow();
-                return true;
+                return CheckStackTopNotException();
             case OpCode.Plus:
                 Plus();
                 return true;
@@ -2820,8 +2831,18 @@ public sealed class Interpreter
             JSValue returnValue = JSValue.Undefined;
             bool didReturn = false;
 
-            while (pc < bytecode.Length && !HasException && !didReturn)
+            while (pc < bytecode.Length && !didReturn)
             {
+                // Check for exceptions at the start of each iteration
+                if (HasException)
+                {
+                    var exVal = _context.CurrentException;
+                    _context.ClearException();  // Clear before trying to handle
+                    if (!HandleThrow(pc - 1, exVal, function!, ref pc))
+                        return JSValue.Exception;
+                    continue;
+                }
+
                 var opcode = (OpCode)bytecode[pc++];
 
                 switch (opcode)
@@ -2861,12 +2882,24 @@ public sealed class Interpreter
                         pc += 4;
                         var fnVal = function!.Constants.Get(constIdx);
                         JSFunctionDef? fnDef = null;
-                        if (fnVal.IsObject)
+                        
+                        // Check if this is a function reference (negative tagged integer)
+                        if (fnVal.TryGetInt32(out int taggedValue) && taggedValue < 0)
+                        {
+                            // Decode: -funcIndex - 1 -> funcIndex = -taggedValue - 1
+                            int funcIndex = -taggedValue - 1;
+                            if (funcIndex >= 0 && funcIndex < function.Children.Count)
+                            {
+                                fnDef = function.Children[funcIndex];
+                            }
+                        }
+                        else if (fnVal.IsObject)
                         {
                             var o = fnVal.AsObject();
                             if (o is JSFunction f && f.FunctionDef != null)
                                 fnDef = f.FunctionDef;
                         }
+                        
                         if (fnDef == null)
                         {
                             _context.ThrowTypeError("Invalid function constant for fclosure");
@@ -2888,12 +2921,24 @@ public sealed class Interpreter
                         int constIdx = bytecode[pc++];
                         var fnVal = function!.Constants.Get(constIdx);
                         JSFunctionDef? fnDef = null;
-                        if (fnVal.IsObject)
+                        
+                        // Check if this is a function reference (negative tagged integer)
+                        if (fnVal.TryGetInt32(out int taggedValue) && taggedValue < 0)
+                        {
+                            // Decode: -funcIndex - 1 -> funcIndex = -taggedValue - 1
+                            int funcIndex = -taggedValue - 1;
+                            if (funcIndex >= 0 && funcIndex < function.Children.Count)
+                            {
+                                fnDef = function.Children[funcIndex];
+                            }
+                        }
+                        else if (fnVal.IsObject)
                         {
                             var o = fnVal.AsObject();
                             if (o is JSFunction f && f.FunctionDef != null)
                                 fnDef = f.FunctionDef;
                         }
+                        
                         if (fnDef == null)
                         {
                             _context.ThrowTypeError("Invalid function constant for fclosure8");
@@ -3028,6 +3073,7 @@ public sealed class Interpreter
 
                 case OpCode.Ret:
                     {
+                        // Check for pending actions first (from finally blocks)
                         if (_pendingAction == PendingActionType.Return)
                         {
                             returnValue = _pendingValue;
@@ -3040,6 +3086,17 @@ public sealed class Interpreter
                             _pendingAction = PendingActionType.None;
                             if (!HandleThrow(pc - 1, exVal, function!, ref pc))
                                 return JSValue.Exception;
+                        }
+                        else
+                        {
+                            // Normal GoSub return: pop return address from stack
+                            var retAddr = Pop();
+                            if (!retAddr.TryGetInt32(out int addr) || addr < 0)
+                            {
+                                _context.ThrowError(JSErrorType.Error, "Invalid return address in Ret");
+                                return JSValue.Exception;
+                            }
+                            pc = addr;
                         }
                     }
                     break;
@@ -3093,22 +3150,43 @@ public sealed class Interpreter
                 case OpCode.CallMethod:
                 case OpCode.TailCallMethod:
                     {
-                        if (pc + 2 > bytecode.Length)
+                        // Format: CallMethod, Atom(4 bytes), ArgCount(2 bytes)
+                        // Stack before: obj, arg0, arg1, ..., argN-1
+                        // Stack after: result
+                        if (pc + 6 > bytecode.Length)
                         {
                             _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
                             return JSValue.Exception;
                         }
+                        int atomId = bytecode[pc] | (bytecode[pc + 1] << 8) | (bytecode[pc + 2] << 16) | (bytecode[pc + 3] << 24);
+                        pc += 4;
                         ushort argc = (ushort)(bytecode[pc] | (bytecode[pc + 1] << 8));
                         pc += 2;
-                        if (_stackPointer < argc + 2)
+                        
+                        if (_stackPointer < argc + 1)
                         {
                             _context.ThrowError(JSErrorType.RangeError, "Stack underflow during method call");
                             return JSValue.Exception;
                         }
-                        int thisIndex = _stackPointer - argc - 2;
-                        int calleeIndex = _stackPointer - argc - 1;
-                        var thisVal = _stack[thisIndex];
-                        var callee = _stack[calleeIndex];
+                        
+                        // Stack: obj, arg0, arg1, ..., argN-1
+                        int objIndex = _stackPointer - argc - 1;
+                        var thisVal = _stack[objIndex];
+                        
+                        // Get the method from the object using the atom
+                        var methodName = _context.Runtime.AtomTable.GetString(new JSAtom((uint)atomId));
+                        JSValue callee;
+                        if (thisVal.IsObject)
+                        {
+                            var obj = thisVal.AsObject()!;
+                            callee = obj.Get(methodName);
+                        }
+                        else
+                        {
+                            _context.ThrowTypeError($"Cannot read property '{methodName}' of {thisVal}");
+                            return JSValue.Exception;
+                        }
+                        
                         var args = new JSValue[argc];
                         Array.Copy(_stack, _stackPointer - argc, args, 0, argc);
 
@@ -3116,7 +3194,8 @@ public sealed class Interpreter
                         if (result.IsException)
                             return JSValue.Exception;
 
-                        _stackPointer -= argc + 2;
+                        // Pop object and args, push result
+                        _stackPointer -= argc + 1;
                         Push(result);
                     }
                     break;
@@ -3651,7 +3730,7 @@ public sealed class Interpreter
                     }
                     break;
 
-                // Control flow: conditional and unconditional jumps (32-bit offsets)
+                // Control flow: conditional and unconditional jumps (32-bit signed offset)
                 case OpCode.IfFalse:
                     {
                         if (pc + 4 > bytecode.Length)
@@ -3783,9 +3862,66 @@ public sealed class Interpreter
                     }
                     break;
 
+                // Exception handling: Catch pushes catch offset onto stack
+                case OpCode.Catch:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int offset = bytecode[pc] |
+                                    (bytecode[pc + 1] << 8) |
+                                    (bytecode[pc + 2] << 16) |
+                                    (bytecode[pc + 3] << 24);
+                        pc += 4;
+                        // Push the catch PC as a negative value to mark it as catch offset
+                        // The offset is relative to current PC (after reading the operand)
+                        int catchPc = pc + offset;
+                        Push(JSValue.FromInt32(-(catchPc + 1)));
+                    }
+                    break;
+
+                // Exception handling: GoSub pushes return address and jumps
+                case OpCode.GoSub:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int offset = bytecode[pc] |
+                                    (bytecode[pc + 1] << 8) |
+                                    (bytecode[pc + 2] << 16) |
+                                    (bytecode[pc + 3] << 24);
+                        pc += 4;
+                        // Push return address (current PC after the instruction)
+                        Push(JSValue.FromInt32(pc));
+                        // Jump to subroutine (finally block)
+                        pc += offset;
+                    }
+                    break;
+
+                // Exception handling: NipCatch removes catch offset from stack, keeps top value
+                case OpCode.NipCatch:
+                    {
+                        // Stack: catch_offset value -> value
+                        if (_stackPointer < 2)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow in NipCatch");
+                            return JSValue.Exception;
+                        }
+                        var top = _stack[_stackPointer - 1];
+                        _stackPointer -= 2;  // Remove both
+                        Push(top);           // Put back the top value
+                    }
+                    break;
+
                 default:
                     if (!ExecuteOpCode(opcode))
-                        return JSValue.Exception;
+                    {
+                        // Exception was set - will be handled at top of loop
+                    }
                     break;
             }
         }
@@ -3817,7 +3953,24 @@ public sealed class Interpreter
 
     private bool HandleThrow(int throwPc, JSValue exVal, JSFunctionDef function, ref int pc)
     {
-        // Scan handlers
+        // First, check for stack-based catch offsets (from Catch opcode)
+        // Scan from top of stack downward looking for negative integers (catch offsets)
+        for (int i = _stackPointer - 1; i >= 0; i--)
+        {
+            if (_stack[i].TryGetInt32(out int val) && val < 0)
+            {
+                // Found a catch offset! Decode it
+                int catchPc = -(val + 1);
+                // Remove everything from the stack including the catch offset
+                _stackPointer = i;
+                // Push the exception value and jump to catch handler
+                Push(exVal);
+                pc = catchPc;
+                return true;
+            }
+        }
+        
+        // Fall back to static exception handlers table
         var handler = FindHandler(function, throwPc);
         if (handler != null)
         {

@@ -308,7 +308,7 @@ public class ByteCodeBufferTests
     }
 
     [Fact]
-    public void EmitJump_ResolvedLabel_NoRelocation()
+    public void EmitJump_ResolvedLabel_StillHasRelocation()
     {
         var buffer = new ByteCodeBuffer();
         int label = buffer.DefineLabel();
@@ -317,7 +317,8 @@ public class ByteCodeBufferTests
         buffer.EmitJump(OpCode.Goto, label);
 
         var info = buffer.GetLabel(label);
-        Assert.False(info.HasRelocations); // Already resolved
+        // Relocations are always added now so ResolveLabels can patch them uniformly
+        Assert.True(info.HasRelocations);
     }
 
     [Fact]

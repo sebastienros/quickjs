@@ -52,6 +52,13 @@ public sealed class Parser
     private JSFunctionDef _currentFunction;
     private bool _isModule;
     private readonly DiagnosticBag _diagnostics = new DiagnosticBag();
+    
+    // LHS tracking for assignment
+    private enum LhsKind { None, GlobalVar, LocalVar, Argument, Property }
+    private LhsKind _lastLhsKind = LhsKind.None;
+    private JSAtom _lastLhsAtom = JSAtom.Empty;
+    private int _lastLhsIndex = -1;
+    private int _lastLhsBytecodePos = -1;  // Position before LHS bytecode
 
     /// <summary>
     /// Creates a new parser.
@@ -513,6 +520,13 @@ public sealed class Parser
 
         if (isAssignment)
         {
+            // Save LHS info before consuming assignment operator
+            var lhsKind = _lastLhsKind;
+            var lhsAtom = _lastLhsAtom;
+            var lhsIndex = _lastLhsIndex;
+            var lhsBytecodePos = _lastLhsBytecodePos;
+            _lastLhsKind = LhsKind.None;
+            
             NextToken(); // consume the assignment operator
 
             if (isCompound)
@@ -530,18 +544,80 @@ public sealed class Parser
                 EmitOp(OpCode.Dup);
                 ParseAssignExpression(flags); // Right-associative
                 EmitOp(compoundOp);
+                
+                // Emit appropriate store based on LHS kind
+                switch (lhsKind)
+                {
+                    case LhsKind.GlobalVar:
+                        // Stack: old_value new_value, but we need obj new_value
+                        // Truncate bytecode to before the GetField, emit PushThis + value + PutField
+                        EmitOp(OpCode.Swap);  // new_value old_value
+                        EmitOp(OpCode.Drop);  // new_value
+                        EmitOp(OpCode.PushThis);
+                        EmitOp(OpCode.Swap);  // this new_value
+                        EmitOp(OpCode.PutField);
+                        EmitAtom(lhsAtom);
+                        EmitOp(OpCode.Drop);  // Result of compound assignment (value stays)
+                        break;
+                    case LhsKind.LocalVar:
+                        EmitOp(OpCode.Swap);
+                        EmitOp(OpCode.Drop);
+                        EmitOp(OpCode.SetLoc);
+                        EmitU16((ushort)lhsIndex);
+                        break;
+                    case LhsKind.Argument:
+                        EmitOp(OpCode.Swap);
+                        EmitOp(OpCode.Drop);
+                        EmitOp(OpCode.SetArg);
+                        EmitU16((ushort)lhsIndex);
+                        break;
+                    default:
+                        EmitOp(OpCode.PutRefValue);
+                        break;
+                }
             }
             else
             {
-                // Simple assignment: parse RHS (right-associative)
+                // Simple assignment: rewrite the bytecode
+                // Truncate to before the LHS get operation, then emit store
+                if (lhsKind != LhsKind.None && lhsBytecodePos >= 0)
+                {
+                    // Truncate bytecode to remove the get operation
+                    _currentFunction.ByteCode.Truncate(lhsBytecodePos);
+                }
+                
+                // Parse RHS (right-associative)
                 ParseAssignExpression(flags);
+                
+                // Emit appropriate store based on LHS kind
+                switch (lhsKind)
+                {
+                    case LhsKind.GlobalVar:
+                        // Stack: value. Need: this value
+                        EmitOp(OpCode.PushThis);
+                        EmitOp(OpCode.Swap);  // this value
+                        EmitOp(OpCode.PutField);
+                        EmitAtom(lhsAtom);
+                        // PutField consumes both, but assignment should return the value
+                        // Re-push the value by getting it again
+                        EmitOp(OpCode.PushThis);
+                        EmitOp(OpCode.GetField);
+                        EmitAtom(lhsAtom);
+                        break;
+                    case LhsKind.LocalVar:
+                        EmitOp(OpCode.SetLoc);
+                        EmitU16((ushort)lhsIndex);
+                        break;
+                    case LhsKind.Argument:
+                        EmitOp(OpCode.SetArg);
+                        EmitU16((ushort)lhsIndex);
+                        break;
+                    default:
+                        // Fallback to PutRefValue (might not work for all cases)
+                        EmitOp(OpCode.PutRefValue);
+                        break;
+                }
             }
-
-            // The actual store operation depends on what the LHS was
-            // For now, emit a generic put reference value operation
-            // In a full implementation, we'd track whether LHS was a variable,
-            // property access, etc. and emit PutVar, PutLoc, PutField accordingly
-            EmitOp(OpCode.PutRefValue);
         }
     }
 
@@ -1234,6 +1310,9 @@ public sealed class Parser
             EmitOp(OpCode.Return);
         }
 
+        // Resolve labels before adding to parent
+        _currentFunction.ByteCode.ResolveLabels();
+
         int funcIdx = parentFunction.AddChildFunction(newFunction);
         _currentFunction = parentFunction;
 
@@ -1379,6 +1458,9 @@ public sealed class Parser
             EmitOp(OpCode.Undefined);
             EmitOp(OpCode.Return);
         }
+
+        // Resolve labels before adding to parent
+        _currentFunction.ByteCode.ResolveLabels();
 
         int funcIdx = parentFunction.AddChildFunction(newFunction);
         _currentFunction = parentFunction;
@@ -1985,6 +2067,9 @@ public sealed class Parser
             EmitOp(OpCode.Return);
         }
 
+        // Resolve labels before adding to parent
+        _currentFunction.ByteCode.ResolveLabels();
+
         int funcIdx = parentFunction.AddChildFunction(blockFunction);
         _currentFunction = parentFunction;
 
@@ -2543,6 +2628,32 @@ public sealed class Parser
         var name = (string)_currentToken.Value!;
         var atom = _atoms.GetOrCreateAtom(name);
         
+        // Track LHS info for potential assignment
+        _lastLhsBytecodePos = _currentFunction.ByteCode.Size;
+        
+        // First check if this is a function argument
+        int argIdx = _currentFunction.FindArg(atom);
+        if (argIdx >= 0)
+        {
+            _lastLhsKind = LhsKind.Argument;
+            _lastLhsAtom = atom;
+            _lastLhsIndex = argIdx;
+            
+            // Use GetArg opcodes for function parameters
+            switch (argIdx)
+            {
+                case 0: EmitOp(OpCode.GetArg0); break;
+                case 1: EmitOp(OpCode.GetArg1); break;
+                case 2: EmitOp(OpCode.GetArg2); break;
+                case 3: EmitOp(OpCode.GetArg3); break;
+                default:
+                    EmitOp(OpCode.GetArg);
+                    EmitU16((ushort)argIdx);
+                    break;
+            }
+            return;
+        }
+        
         // Check if this is a known local variable
         int varIdx = _currentFunction.FindVar(atom);
         if (varIdx >= 0)
@@ -2553,6 +2664,10 @@ public sealed class Parser
             if (_currentFunction.IsGlobalVar && !varDef.IsLexical)
             {
                 // Global var - read from global object property using PushThis + GetField
+                _lastLhsKind = LhsKind.GlobalVar;
+                _lastLhsAtom = atom;
+                _lastLhsIndex = varIdx;
+                
                 EmitOp(OpCode.PushThis);   // Push global object
                 EmitOp(OpCode.GetField);
                 EmitAtom(atom);
@@ -2560,6 +2675,10 @@ public sealed class Parser
             else
             {
                 // Use GetLoc for local variables (avoids conflicting scope opcodes)
+                _lastLhsKind = LhsKind.LocalVar;
+                _lastLhsAtom = atom;
+                _lastLhsIndex = varIdx;
+                
                 EmitOp(OpCode.GetLoc);
                 EmitU16((ushort)varIdx);
             }
@@ -2567,6 +2686,10 @@ public sealed class Parser
         else
         {
             // Unknown variable - try to read from global object property
+            _lastLhsKind = LhsKind.GlobalVar;
+            _lastLhsAtom = atom;
+            _lastLhsIndex = -1;
+            
             EmitOp(OpCode.PushThis);   // Push global object  
             EmitOp(OpCode.GetField);
             EmitAtom(atom);
@@ -2768,6 +2891,9 @@ public sealed class Parser
         {
             ParseStatement();
         }
+        
+        // Resolve labels to convert label indices to relative offsets
+        _currentFunction.ByteCode.ResolveLabels();
     }
 
     /// <summary>
@@ -3022,9 +3148,8 @@ public sealed class Parser
                         // Get global object (this in global scope), then set property
                         EmitOp(OpCode.PushThis);         // Stack: [value, globalThis]
                         EmitOp(OpCode.Swap);             // Stack: [globalThis, value]
-                        EmitOp(OpCode.PutField);
-                        EmitAtom(atom);                  // Stack: [value] (SetField returns value)
-                        EmitOp(OpCode.Drop);             // Stack: []
+                        EmitOp(OpCode.PutField);         // Stack: [] (PutField pops obj and value)
+                        EmitAtom(atom);
                     }
                     else
                     {
@@ -3052,9 +3177,8 @@ public sealed class Parser
                     EmitOp(OpCode.Undefined);
                     EmitOp(OpCode.PushThis);
                     EmitOp(OpCode.Swap);
-                    EmitOp(OpCode.PutField);
+                    EmitOp(OpCode.PutField);             // Stack: [] (PutField pops obj and value)
                     EmitAtom(atom);
-                    EmitOp(OpCode.Drop);
                 }
             }
             else
@@ -3611,10 +3735,10 @@ public sealed class Parser
                 Expect(TokenType.RightParen);
 
                 // Define catch variable and store exception
+                // For now, just drop the exception - proper variable binding needs scope resolution
+                // TODO: Implement proper scope resolution to transform ScopePutVar to PutVarRef
                 _currentFunction.AddVar(atom, JSVarKind.Normal, false, true);
-                EmitOp(OpCode.ScopePutVar);
-                EmitAtom(atom);
-                EmitU16((ushort)_currentFunction.ScopeLevel);
+                EmitOp(OpCode.Drop);  // Drop exception value for now
             }
             else
             {
@@ -3898,6 +4022,9 @@ public sealed class Parser
             EmitOp(OpCode.Return);
         }
 
+        // Resolve labels to convert label indices to relative offsets
+        _currentFunction.ByteCode.ResolveLabels();
+
         // Add the function to the parent's child functions
         int funcIdx = parentFunction.AddChildFunction(newFunction);
 
@@ -3911,9 +4038,24 @@ public sealed class Parser
         // For function declarations, store in the variable
         if (funcType == JSParseFunctionType.Statement && !funcName.IsEmpty)
         {
-            EmitOp(OpCode.ScopePutVar);
-            EmitAtom(funcName);
-            EmitU16((ushort)_currentFunction.ScopeLevel);
+            // For global scope (IsGlobalVar), store as a global property
+            // For local scope, use PutLoc
+            if (_currentFunction.IsGlobalVar)
+            {
+                // Stack: [function]
+                // Store as global property: globalThis.funcName = function
+                EmitOp(OpCode.PushThis);         // Stack: [function, globalThis]
+                EmitOp(OpCode.Swap);             // Stack: [globalThis, function]
+                EmitOp(OpCode.PutField);         // Stack: [] (PutField pops obj and value)
+                EmitAtom(funcName);
+            }
+            else
+            {
+                // Local function declaration - use PutLoc
+                int varIdx = _currentFunction.AddVar(funcName, JSVarKind.FunctionDecl, false, false);
+                EmitOp(OpCode.PutLoc);
+                EmitU16((ushort)varIdx);
+            }
         }
     }
 

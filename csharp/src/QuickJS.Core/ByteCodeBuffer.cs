@@ -46,6 +46,18 @@ public sealed class ByteCodeBuffer
     public int LabelCount => _labels.Count;
 
     /// <summary>
+    /// Gets the position of a label by its index.
+    /// </summary>
+    /// <param name="labelIndex">The label index.</param>
+    /// <returns>The bytecode position of the label.</returns>
+    public int GetLabelPosition(int labelIndex)
+    {
+        if (labelIndex < 0 || labelIndex >= _labels.Count)
+            throw new ArgumentOutOfRangeException(nameof(labelIndex));
+        return _labels[labelIndex].Position;
+    }
+
+    /// <summary>
     /// Truncates the buffer to the specified size.
     /// Used when reparsing (e.g., arrow function detection).
     /// </summary>
@@ -272,11 +284,56 @@ public sealed class ByteCodeBuffer
         EmitU32((uint)label);
         labelInfo.AddReference();
 
-        // If label is not yet resolved, add a relocation
-        if (!labelInfo.IsMarked)
+        // Always add a relocation - we'll resolve all jumps at the end
+        labelInfo.AddRelocation(addressPos, 4);
+    }
+
+    /// <summary>
+    /// Resolves all label references in the bytecode, converting label indices to relative offsets.
+    /// This should be called after all bytecode has been emitted.
+    /// </summary>
+    public void ResolveLabels()
+    {
+        foreach (var labelInfo in _labels)
         {
-            labelInfo.AddRelocation(addressPos, 4);
+            if (!labelInfo.IsMarked)
+            {
+                // Skip unmarked labels - they may be dead code
+                continue;
+            }
+
+            // Process all relocations for this label
+            var reloc = labelInfo.FirstReloc;
+            while (reloc != null)
+            {
+                // Calculate relative offset from the position AFTER the address field
+                // The jump instruction reads the offset from addressPos, and pc is at addressPos + 4
+                // So the offset should be: targetPosition - (addressPos + 4)
+                int targetPosition = labelInfo.Position;
+                int jumpFrom = reloc.Address + reloc.Size; // Position after reading the offset
+                int relativeOffset = targetPosition - jumpFrom;
+
+                // Patch the bytecode with the relative offset
+                PutI32(reloc.Address, relativeOffset);
+
+                reloc = reloc.Next;
+            }
         }
+    }
+
+    /// <summary>
+    /// Sets a 32-bit signed value at the specified offset (little-endian).
+    /// </summary>
+    /// <param name="offset">The byte offset.</param>
+    /// <param name="value">The value to set.</param>
+    public void PutI32(int offset, int value)
+    {
+        if (offset < 0 || offset + 3 >= _size)
+            throw new ArgumentOutOfRangeException(nameof(offset));
+        _buffer[offset] = (byte)(value & 0xFF);
+        _buffer[offset + 1] = (byte)((value >> 8) & 0xFF);
+        _buffer[offset + 2] = (byte)((value >> 16) & 0xFF);
+        _buffer[offset + 3] = (byte)((value >> 24) & 0xFF);
     }
 
     /// <summary>

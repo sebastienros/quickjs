@@ -176,7 +176,30 @@ Type '.help' for help, '.exit' to quit
         var ex = context.CurrentException;
         if (!ex.IsUndefined)
         {
-            Console.Error.WriteLine(ex.ToString());
+            // Debug: Try to get message property if it's an object
+            if (ex.IsObject)
+            {
+                var obj = ex.AsObject();
+                if (obj != null)
+                {
+                    var msg = obj.Get("message");
+                    var stack = obj.Get("stack");
+                    Console.Error.WriteLine($"Exception type: {obj.GetType().Name}");
+                    Console.Error.WriteLine($"Message: {msg}");
+                    if (!stack.IsUndefined)
+                    {
+                        Console.Error.WriteLine($"Stack: {stack}");
+                    }
+                }
+                else
+                {
+                    Console.Error.WriteLine(ex.ToString());
+                }
+            }
+            else
+            {
+                Console.Error.WriteLine(ex.ToString());
+            }
         }
         else
         {
