@@ -2714,6 +2714,314 @@ public sealed class JSContext : IDisposable
         promiseCtorFn.Set("resolve", JSValue.FromObject(new JSFunction(PromiseResolve, "resolve", 1, functionProto)));
         promiseCtorFn.Set("reject", JSValue.FromObject(new JSFunction(PromiseReject, "reject", 1, functionProto)));
 
+        // Promise.all - resolves when all promises resolve, rejects if any rejects
+        JSValue PromiseAll(JSValue thisVal, JSValue[] args)
+        {
+            var iterable = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var promises = GetIterableValues(iterable);
+            
+            if (promises.Count == 0)
+            {
+                return PromiseResolve(thisVal, new[] { JSValue.FromObject(CreateArrayForPromise()) });
+            }
+
+            JSObject? resultPromise = null;
+            JSFunction? resolveFn = null;
+            JSFunction? rejectFn = null;
+
+            var resultP = PromiseCtor(JSValue.Undefined, new[] { JSValue.FromObject(new JSFunction((_, a) =>
+            {
+                resolveFn = (JSFunction)a[0].AsObject();
+                rejectFn = (JSFunction)a[1].AsObject();
+                return JSValue.Undefined;
+            }, prototype: functionProto)) });
+            resultPromise = resultP.AsObject();
+
+            var results = new JSValue[promises.Count];
+            var remaining = promises.Count;
+            var rejected = false;
+
+            for (var i = 0; i < promises.Count; i++)
+            {
+                var index = i;
+                var p = promises[i];
+                
+                // Convert to promise if not already
+                var promiseVal = PromiseResolve(thisVal, new[] { p });
+                var promise = promiseVal.AsObject();
+                
+                var thenFn = (JSFunction)promise.Prototype!.Get("then").AsObject();
+                thenFn.CallNative(promiseVal, new[]
+                {
+                    JSValue.FromObject(new JSFunction((_, a) =>
+                    {
+                        if (rejected) return JSValue.Undefined;
+                        results[index] = a.Length > 0 ? a[0] : JSValue.Undefined;
+                        remaining--;
+                        if (remaining == 0)
+                        {
+                            var resultArray = CreateArrayForPromise();
+                            for (var j = 0; j < results.Length; j++)
+                            {
+                                resultArray.Set((uint)j, results[j]);
+                            }
+                            resolveFn?.CallNative(JSValue.Undefined, new[] { JSValue.FromObject(resultArray) });
+                        }
+                        return JSValue.Undefined;
+                    }, prototype: functionProto)),
+                    JSValue.FromObject(new JSFunction((_, a) =>
+                    {
+                        if (rejected) return JSValue.Undefined;
+                        rejected = true;
+                        rejectFn?.CallNative(JSValue.Undefined, a);
+                        return JSValue.Undefined;
+                    }, prototype: functionProto))
+                });
+            }
+
+            return resultP;
+        }
+
+        // Promise.race - resolves/rejects with the first settled promise
+        JSValue PromiseRace(JSValue thisVal, JSValue[] args)
+        {
+            var iterable = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var promises = GetIterableValues(iterable);
+
+            JSObject? resultPromise = null;
+            JSFunction? resolveFn = null;
+            JSFunction? rejectFn = null;
+
+            var resultP = PromiseCtor(JSValue.Undefined, new[] { JSValue.FromObject(new JSFunction((_, a) =>
+            {
+                resolveFn = (JSFunction)a[0].AsObject();
+                rejectFn = (JSFunction)a[1].AsObject();
+                return JSValue.Undefined;
+            }, prototype: functionProto)) });
+            resultPromise = resultP.AsObject();
+
+            var settled = false;
+
+            foreach (var p in promises)
+            {
+                var promiseVal = PromiseResolve(thisVal, new[] { p });
+                var promise = promiseVal.AsObject();
+                
+                var thenFn = (JSFunction)promise.Prototype!.Get("then").AsObject();
+                thenFn.CallNative(promiseVal, new[]
+                {
+                    JSValue.FromObject(new JSFunction((_, a) =>
+                    {
+                        if (settled) return JSValue.Undefined;
+                        settled = true;
+                        resolveFn?.CallNative(JSValue.Undefined, a);
+                        return JSValue.Undefined;
+                    }, prototype: functionProto)),
+                    JSValue.FromObject(new JSFunction((_, a) =>
+                    {
+                        if (settled) return JSValue.Undefined;
+                        settled = true;
+                        rejectFn?.CallNative(JSValue.Undefined, a);
+                        return JSValue.Undefined;
+                    }, prototype: functionProto))
+                });
+            }
+
+            return resultP;
+        }
+
+        // Promise.allSettled - resolves when all promises settle (either resolve or reject)
+        JSValue PromiseAllSettled(JSValue thisVal, JSValue[] args)
+        {
+            var iterable = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var promises = GetIterableValues(iterable);
+            
+            if (promises.Count == 0)
+            {
+                return PromiseResolve(thisVal, new[] { JSValue.FromObject(CreateArrayForPromise()) });
+            }
+
+            JSObject? resultPromise = null;
+            JSFunction? resolveFn = null;
+
+            var resultP = PromiseCtor(JSValue.Undefined, new[] { JSValue.FromObject(new JSFunction((_, a) =>
+            {
+                resolveFn = (JSFunction)a[0].AsObject();
+                return JSValue.Undefined;
+            }, prototype: functionProto)) });
+            resultPromise = resultP.AsObject();
+
+            var results = new JSObject[promises.Count];
+            var remaining = promises.Count;
+
+            for (var i = 0; i < promises.Count; i++)
+            {
+                var index = i;
+                var p = promises[i];
+                
+                var promiseVal = PromiseResolve(thisVal, new[] { p });
+                var promise = promiseVal.AsObject();
+                
+                var thenFn = (JSFunction)promise.Prototype!.Get("then").AsObject();
+                thenFn.CallNative(promiseVal, new[]
+                {
+                    JSValue.FromObject(new JSFunction((_, a) =>
+                    {
+                        var resultObj = new JSObject(objectProto, JSClassId.Object);
+                        resultObj.Set("status", JSValue.FromString("fulfilled"));
+                        resultObj.Set("value", a.Length > 0 ? a[0] : JSValue.Undefined);
+                        results[index] = resultObj;
+                        remaining--;
+                        if (remaining == 0)
+                        {
+                            var resultArray = CreateArrayForPromise();
+                            for (var j = 0; j < results.Length; j++)
+                            {
+                                resultArray.Set((uint)j, JSValue.FromObject(results[j]));
+                            }
+                            resolveFn?.CallNative(JSValue.Undefined, new[] { JSValue.FromObject(resultArray) });
+                        }
+                        return JSValue.Undefined;
+                    }, prototype: functionProto)),
+                    JSValue.FromObject(new JSFunction((_, a) =>
+                    {
+                        var resultObj = new JSObject(objectProto, JSClassId.Object);
+                        resultObj.Set("status", JSValue.FromString("rejected"));
+                        resultObj.Set("reason", a.Length > 0 ? a[0] : JSValue.Undefined);
+                        results[index] = resultObj;
+                        remaining--;
+                        if (remaining == 0)
+                        {
+                            var resultArray = CreateArrayForPromise();
+                            for (var j = 0; j < results.Length; j++)
+                            {
+                                resultArray.Set((uint)j, JSValue.FromObject(results[j]));
+                            }
+                            resolveFn?.CallNative(JSValue.Undefined, new[] { JSValue.FromObject(resultArray) });
+                        }
+                        return JSValue.Undefined;
+                    }, prototype: functionProto))
+                });
+            }
+
+            return resultP;
+        }
+
+        // Promise.any - resolves with the first fulfilled promise, rejects with AggregateError if all reject
+        JSValue PromiseAny(JSValue thisVal, JSValue[] args)
+        {
+            var iterable = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var promises = GetIterableValues(iterable);
+            
+            if (promises.Count == 0)
+            {
+                // Should reject with AggregateError when no promises
+                return PromiseReject(thisVal, new[] { JSValue.FromString("All promises were rejected") });
+            }
+
+            JSObject? resultPromise = null;
+            JSFunction? resolveFn = null;
+            JSFunction? rejectFn = null;
+
+            var resultP = PromiseCtor(JSValue.Undefined, new[] { JSValue.FromObject(new JSFunction((_, a) =>
+            {
+                resolveFn = (JSFunction)a[0].AsObject();
+                rejectFn = (JSFunction)a[1].AsObject();
+                return JSValue.Undefined;
+            }, prototype: functionProto)) });
+            resultPromise = resultP.AsObject();
+
+            var errors = new JSValue[promises.Count];
+            var remaining = promises.Count;
+            var resolved = false;
+
+            for (var i = 0; i < promises.Count; i++)
+            {
+                var index = i;
+                var p = promises[i];
+                
+                var promiseVal = PromiseResolve(thisVal, new[] { p });
+                var promise = promiseVal.AsObject();
+                
+                var thenFn = (JSFunction)promise.Prototype!.Get("then").AsObject();
+                thenFn.CallNative(promiseVal, new[]
+                {
+                    JSValue.FromObject(new JSFunction((_, a) =>
+                    {
+                        if (resolved) return JSValue.Undefined;
+                        resolved = true;
+                        resolveFn?.CallNative(JSValue.Undefined, a);
+                        return JSValue.Undefined;
+                    }, prototype: functionProto)),
+                    JSValue.FromObject(new JSFunction((_, a) =>
+                    {
+                        if (resolved) return JSValue.Undefined;
+                        errors[index] = a.Length > 0 ? a[0] : JSValue.Undefined;
+                        remaining--;
+                        if (remaining == 0)
+                        {
+                            // Create AggregateError with all rejection reasons
+                            var errorsArray = CreateArrayForPromise();
+                            for (var j = 0; j < errors.Length; j++)
+                            {
+                                errorsArray.Set((uint)j, errors[j]);
+                            }
+                            
+                            var aggregateError = new JSObject(objectProto, JSClassId.Object);
+                            aggregateError.Set("name", JSValue.FromString("AggregateError"));
+                            aggregateError.Set("message", JSValue.FromString("All promises were rejected"));
+                            aggregateError.Set("errors", JSValue.FromObject(errorsArray));
+                            rejectFn?.CallNative(JSValue.Undefined, new[] { JSValue.FromObject(aggregateError) });
+                        }
+                        return JSValue.Undefined;
+                    }, prototype: functionProto))
+                });
+            }
+
+            return resultP;
+        }
+
+        // Helper function to get values from an iterable (array-like)
+        List<JSValue> GetIterableValues(JSValue iterable)
+        {
+            var values = new List<JSValue>();
+            if (!iterable.IsObject) return values;
+            
+            var obj = iterable.AsObject();
+            var lengthVal = obj.Get("length");
+            if (lengthVal.Tag == JSValueType.Int)
+            {
+                var length = lengthVal.ToInt32();
+                for (var i = 0; i < length; i++)
+                {
+                    values.Add(obj.Get((uint)i));
+                }
+            }
+            else
+            {
+                // Try to iterate via numeric indices until we get undefined
+                for (var i = 0; ; i++)
+                {
+                    var val = obj.Get((uint)i);
+                    if (val.Tag == JSValueType.Undefined && !obj.HasProperty((uint)i))
+                        break;
+                    values.Add(val);
+                }
+            }
+            return values;
+        }
+
+        // Helper function to create an array
+        JSObject CreateArrayForPromise()
+        {
+            return new JSObject(GetClassPrototype(JSClassId.Array), JSClassId.Array);
+        }
+
+        promiseCtorFn.Set("all", JSValue.FromObject(new JSFunction(PromiseAll, "all", 1, functionProto)));
+        promiseCtorFn.Set("race", JSValue.FromObject(new JSFunction(PromiseRace, "race", 1, functionProto)));
+        promiseCtorFn.Set("allSettled", JSValue.FromObject(new JSFunction(PromiseAllSettled, "allSettled", 1, functionProto)));
+        promiseCtorFn.Set("any", JSValue.FromObject(new JSFunction(PromiseAny, "any", 1, functionProto)));
+
         _globalObject.Set("Promise", JSValue.FromObject(promiseCtorFn));
 
         void RunPromiseReactions(JSObject promise, bool fulfilled)

@@ -54,9 +54,9 @@ Use `#if` directives when needed:
 | Phase 6: VM & Interpreter | ✅ Complete | 7/7 | ~704 |
 | Phase 7: Built-in Objects | ✅ Complete | 13/13 | ~1077 |
 | Phase 8: Standard Library | ✅ Complete | 3/3 | ~108 |
-| Phase 9: Advanced Features | 🚧 In Progress | 2/4 | ~103 |
+| Phase 9: Advanced Features | 🚧 In Progress | 2/4 | ~139 |
 
-**Total Tests: 2345** (all passing, 0 skipped)
+**Total Tests: 4756** (all passing, 0 skipped)
 
 **Latest Commit**: `step-9.2-generators`
 
@@ -651,7 +651,7 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 - [x] Implement Promise constructor
 - [x] Implement microtask queue
 - [x] Implement then/catch/finally
-- [ ] Implement Promise.all, race, etc.
+- [x] Implement Promise.all, race, etc.
 - [x] Write promise tests
 
 ---
@@ -662,7 +662,7 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 - [x] Implement Map and Set
 - [x] Implement WeakMap and WeakSet
-- [ ] Write collection tests
+- [x] Write collection tests
 
 ---
 
