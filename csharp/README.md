@@ -784,13 +784,20 @@ Example: `step-1.1-create-solution`, `step-2.3-lexer-numbers`
 
 ---
 
-### Step 9.4: BigInt
+### Step 9.4: BigInt ⚠️ (Partial)
 **Commit**: `step-9.4-bigint`  
 **Doc**: `docs/59-bigint.md`
 
-- [ ] Implement BigInt type
-- [ ] Implement BigInt operations
-- [ ] Write BigInt tests
+- [x] Implement BigInt type (JSBigInt class)
+- [x] Implement BigInt operations (arithmetic, bitwise, comparison)
+- [x] Implement BigInt in interpreter operations
+- [x] Implement ToBigInt opcode
+- [x] Implement BigInt literal parsing (lexer)
+- [x] Implement BigInt literal emission (parser)
+- [ ] Write BigInt tests (blocked by eval completion value issue)
+- [ ] Implement BigInt constructor and prototype methods
+
+> **Note**: The BigInt infrastructure is complete but testing is blocked by a separate issue where expression statements don't return their completion values properly. See `docs/59-bigint.md` for details.
 
 ---
 

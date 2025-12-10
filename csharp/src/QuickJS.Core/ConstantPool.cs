@@ -83,6 +83,16 @@ public sealed class ConstantPool
     }
 
     /// <summary>
+    /// Adds a BigInt constant to the pool.
+    /// </summary>
+    /// <param name="value">The BigInt value.</param>
+    /// <returns>The index of the constant in the pool.</returns>
+    public int AddBigInt(JSBigInt value)
+    {
+        return Add(JSValue.FromBigInt(value));
+    }
+
+    /// <summary>
     /// Adds a string constant to the pool.
     /// </summary>
     /// <param name="value">The string value.</param>

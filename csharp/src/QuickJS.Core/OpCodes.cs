@@ -150,6 +150,7 @@ public static class OpCodes
             // Type conversion
             new(OpCode.ToObject, "to_object", 1, 1, 1, OpCodeFormat.None),
             new(OpCode.ToPropKey, "to_propkey", 1, 1, 1, OpCodeFormat.None),
+            new(OpCode.ToBigInt, "to_bigint", 1, 1, 1, OpCodeFormat.None),
 
             // With statement
             new(OpCode.WithGetVar, "with_get_var", 10, 1, 0, OpCodeFormat.AtomLabelU8),

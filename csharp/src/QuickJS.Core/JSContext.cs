@@ -727,6 +727,7 @@ public sealed class JSContext : IDisposable
         InitializeTypedArrays();
         InitializeDate();
         InitializeSymbol();
+        InitializeBigInt();
         InitializeReflect();
         InitializeProxy();
         InitializeConsole();
@@ -4714,6 +4715,177 @@ public sealed class JSContext : IDisposable
         symbolFunc.Set("unscopables", JSValue.FromSymbol(JSSymbol.Unscopables));
 
         _globalObject.Set("Symbol", JSValue.FromObject(symbolFunc));
+    }
+
+    private void InitializeBigInt()
+    {
+        var objectProto = GetClassPrototype(JSClassId.Object)!;
+        var functionProto = GetClassPrototype(JSClassId.CFunction)!;
+
+        // Create BigInt prototype
+        var bigIntProto = new JSObject(objectProto, JSClassId.BigInt);
+        _classPrototypes[(int)JSClassId.BigInt] = bigIntProto;
+
+        // BigInt() - converts value to BigInt (not a constructor)
+        JSValue BigIntFunc(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length == 0)
+                return ThrowTypeError("Cannot convert undefined to a BigInt");
+
+            var arg = args[0];
+
+            // Already a BigInt
+            if (arg.IsBigInt)
+                return arg;
+
+            // From number (must be integer)
+            if (arg.IsInt)
+            {
+                return JSValue.FromBigInt(arg.ToInt32());
+            }
+
+            if (arg.IsNumber)
+            {
+                double d = arg.ToDouble();
+                if (double.IsNaN(d) || double.IsInfinity(d))
+                    return ThrowRangeError("Cannot convert NaN or Infinity to BigInt");
+                if (d != Math.Truncate(d))
+                    return ThrowRangeError("Cannot convert non-integer to BigInt");
+                return JSValue.FromBigInt((long)d);
+            }
+
+            // From string
+            if (arg.IsString)
+            {
+                string str = arg.ToString().Trim();
+                if (string.IsNullOrEmpty(str))
+                    return ThrowSyntaxError("Cannot convert empty string to BigInt");
+
+                try
+                {
+                    var bigInt = JSBigInt.Parse(str);
+                    return JSValue.FromBigInt(bigInt);
+                }
+                catch
+                {
+                    return ThrowSyntaxError($"Cannot convert \"{str}\" to BigInt");
+                }
+            }
+
+            // From boolean
+            if (arg.IsBool)
+            {
+                return JSValue.FromBigInt(arg.IsTrue ? 1L : 0L);
+            }
+
+            return ThrowTypeError("Cannot convert value to BigInt");
+        }
+
+        var bigIntFunc = new JSFunction(BigIntFunc, "BigInt", 1, functionProto);
+        bigIntFunc.SetPrototype(functionProto);
+
+        // Override [[Construct]] to throw
+        // (BigInt is not a constructor - cannot use new BigInt())
+        // This is handled by the function itself checking for new.target
+
+        // BigInt.asIntN(bits, bigint)
+        JSValue BigIntAsIntN(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 2)
+                return ThrowTypeError("BigInt.asIntN requires 2 arguments");
+
+            int bits = args[0].ToInt32();
+            if (bits < 0)
+                return ThrowRangeError("Invalid bit width");
+
+            if (!args[1].IsBigInt)
+                return ThrowTypeError("Cannot convert to BigInt");
+
+            var bigInt = args[1].AsBigInt();
+            return JSValue.FromBigInt(JSBigInt.AsIntN(bits, bigInt));
+        }
+
+        // BigInt.asUintN(bits, bigint)
+        JSValue BigIntAsUintN(JSValue thisVal, JSValue[] args)
+        {
+            if (args.Length < 2)
+                return ThrowTypeError("BigInt.asUintN requires 2 arguments");
+
+            int bits = args[0].ToInt32();
+            if (bits < 0)
+                return ThrowRangeError("Invalid bit width");
+
+            if (!args[1].IsBigInt)
+                return ThrowTypeError("Cannot convert to BigInt");
+
+            var bigInt = args[1].AsBigInt();
+            return JSValue.FromBigInt(JSBigInt.AsUintN(bits, bigInt));
+        }
+
+        bigIntFunc.Set("asIntN", JSValue.FromObject(new JSFunction(BigIntAsIntN, "asIntN", 2, functionProto)));
+        bigIntFunc.Set("asUintN", JSValue.FromObject(new JSFunction(BigIntAsUintN, "asUintN", 2, functionProto)));
+
+        // BigInt.prototype.toString([radix])
+        JSValue BigIntToString(JSValue thisVal, JSValue[] args)
+        {
+            JSBigInt? bigInt = null;
+
+            if (thisVal.IsBigInt)
+            {
+                bigInt = thisVal.AsBigInt();
+            }
+            else if (thisVal.IsObject)
+            {
+                var obj = thisVal.AsObject();
+                if (obj.ClassId == JSClassId.BigInt && obj.InternalValue.IsBigInt)
+                    bigInt = obj.InternalValue.AsBigInt();
+            }
+
+            if (bigInt == null)
+                return ThrowTypeError("BigInt.prototype.toString requires that 'this' be a BigInt");
+
+            int radix = 10;
+            if (args.Length > 0 && !args[0].IsUndefined)
+            {
+                radix = args[0].ToInt32();
+                if (radix < 2 || radix > 36)
+                    return ThrowRangeError("toString() radix must be between 2 and 36");
+            }
+
+            return JSValue.FromString(bigInt.ToString(radix));
+        }
+
+        // BigInt.prototype.valueOf()
+        JSValue BigIntValueOf(JSValue thisVal, JSValue[] args)
+        {
+            if (thisVal.IsBigInt)
+                return thisVal;
+
+            if (thisVal.IsObject)
+            {
+                var obj = thisVal.AsObject();
+                if (obj.ClassId == JSClassId.BigInt && obj.InternalValue.IsBigInt)
+                    return obj.InternalValue;
+            }
+
+            return ThrowTypeError("BigInt.prototype.valueOf requires that 'this' be a BigInt");
+        }
+
+        // BigInt.prototype.toLocaleString()
+        JSValue BigIntToLocaleString(JSValue thisVal, JSValue[] args)
+        {
+            // For simplicity, just use toString
+            return BigIntToString(thisVal, args);
+        }
+
+        bigIntProto.Set("toString", JSValue.FromObject(new JSFunction(BigIntToString, "toString", 0, functionProto)));
+        bigIntProto.Set("valueOf", JSValue.FromObject(new JSFunction(BigIntValueOf, "valueOf", 0, functionProto)));
+        bigIntProto.Set("toLocaleString", JSValue.FromObject(new JSFunction(BigIntToLocaleString, "toLocaleString", 0, functionProto)));
+
+        // Symbol.toStringTag - use DefineProperty for Symbol keys
+        bigIntProto.DefineProperty(JSSymbol.ToStringTag.Description!, new PropertyDescriptor(JSValue.FromString("BigInt"), PropertyFlags.Configurable));
+
+        _globalObject.Set("BigInt", JSValue.FromObject(bigIntFunc));
     }
 
     private void InitializeReflect()

@@ -2435,8 +2435,55 @@ public sealed class Parser
     private void EmitNumberLiteral()
     {
         var value = _currentToken.Value;
+        var text = _currentToken.Text;
 
-        if (value is int i32)
+        // Check if this is a BigInt literal (ends with 'n')
+        bool isBigInt = text.EndsWith("n", StringComparison.Ordinal);
+
+        if (isBigInt)
+        {
+            // BigInt literal
+            if (value is long l64)
+            {
+                // Small BigInt - emit as short BigInt
+                if (l64 >= int.MinValue && l64 <= int.MaxValue)
+                {
+                    EmitOp(OpCode.PushI32);
+                    EmitI32((int)l64);
+                    // Convert int to BigInt
+                    EmitOp(OpCode.ToBigInt);
+                }
+                else
+                {
+                    // Larger BigInt - add to constant pool as JSBigInt
+                    var bigInt = new JSBigInt(l64);
+                    int idx = _currentFunction.Constants.AddBigInt(bigInt);
+                    EmitOp(OpCode.PushConst);
+                    EmitU32((uint)idx);
+                }
+            }
+            else if (value is int i32)
+            {
+                EmitOp(OpCode.PushI32);
+                EmitI32(i32);
+                EmitOp(OpCode.ToBigInt);
+            }
+            else if (value is System.Numerics.BigInteger bigVal)
+            {
+                // Very large BigInt - add to constant pool
+                var bigInt = new JSBigInt(bigVal);
+                int idx = _currentFunction.Constants.AddBigInt(bigInt);
+                EmitOp(OpCode.PushConst);
+                EmitU32((uint)idx);
+            }
+            else
+            {
+                throw new JSSyntaxError(
+                    $"Invalid BigInt literal: {text}",
+                    _currentToken.Start);
+            }
+        }
+        else if (value is int i32)
         {
             EmitOp(OpCode.PushI32);
             EmitI32(i32);
@@ -2450,7 +2497,7 @@ public sealed class Parser
             }
             else
             {
-                // BigInt or large number - add to constant pool
+                // Large number - add to constant pool
                 int idx = _currentFunction.Constants.AddDouble((double)i64);
                 EmitOp(OpCode.PushConst);
                 EmitU32((uint)idx);

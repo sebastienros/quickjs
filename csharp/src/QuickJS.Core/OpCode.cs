@@ -393,6 +393,9 @@ public enum OpCode : ushort
     /// <summary>Convert to property key.</summary>
     ToPropKey,
 
+    /// <summary>Convert to BigInt.</summary>
+    ToBigInt,
+
     // ========================================
     // With statement variable access
     // ========================================

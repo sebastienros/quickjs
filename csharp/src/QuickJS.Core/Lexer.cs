@@ -663,7 +663,16 @@ public sealed class Lexer
                 // Decimal (possibly floating point)
                 if (isBigInt)
                 {
-                    return long.Parse(cleanText, CultureInfo.InvariantCulture);
+                    // Use BigInteger for large numbers
+                    if (System.Numerics.BigInteger.TryParse(cleanText, out var bigVal))
+                    {
+                        // If it fits in a long, return as long for efficiency
+                        if (bigVal >= long.MinValue && bigVal <= long.MaxValue)
+                            return (long)bigVal;
+                        // Return as BigInteger for very large numbers
+                        return bigVal;
+                    }
+                    return null;
                 }
                 else
                 {

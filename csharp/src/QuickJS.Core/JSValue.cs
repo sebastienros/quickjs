@@ -226,6 +226,39 @@ public readonly struct JSValue : IEquatable<JSValue>
         return new JSValue(JSValueType.Symbol, symbol);
     }
 
+    /// <summary>
+    /// Creates a JavaScript BigInt value from a long.
+    /// </summary>
+    /// <param name="value">The long value.</param>
+    /// <returns>A JSValue representing the BigInt.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static JSValue FromBigInt(long value)
+    {
+        return new JSValue(JSValueType.ShortBigInt, value);
+    }
+
+    /// <summary>
+    /// Creates a JavaScript BigInt value from a JSBigInt.
+    /// </summary>
+    /// <param name="value">The JSBigInt value.</param>
+    /// <returns>A JSValue representing the BigInt.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static JSValue FromBigInt(JSBigInt value)
+    {
+        if (value is null)
+        {
+            ThrowArgumentNull(nameof(value));
+        }
+
+        // Use ShortBigInt for values that fit in a long
+        if (value.TryToInt64(out long longVal))
+        {
+            return new JSValue(JSValueType.ShortBigInt, longVal);
+        }
+
+        return new JSValue(JSValueType.BigInt, value);
+    }
+
     #endregion
 
     #region Type Properties
@@ -565,6 +598,44 @@ public readonly struct JSValue : IEquatable<JSValue>
         }
 
         throw new InvalidOperationException($"Cannot convert {_tag} to Symbol.");
+    }
+
+    /// <summary>
+    /// Attempts to get this value as a JSBigInt.
+    /// </summary>
+    /// <param name="result">The BigInt if successful.</param>
+    /// <returns>True if this value is a BigInt.</returns>
+    public bool TryGetBigInt([NotNullWhen(true)] out JSBigInt? result)
+    {
+        if (_tag == JSValueType.ShortBigInt)
+        {
+            result = new JSBigInt(_int64Value);
+            return true;
+        }
+
+        if (_tag == JSValueType.BigInt && _objectValue is JSBigInt bigInt)
+        {
+            result = bigInt;
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Gets this value as a JSBigInt.
+    /// </summary>
+    /// <returns>The JSBigInt.</returns>
+    /// <exception cref="InvalidOperationException">Thrown if this value is not a BigInt.</exception>
+    public JSBigInt AsBigInt()
+    {
+        if (TryGetBigInt(out var result))
+        {
+            return result;
+        }
+
+        throw new InvalidOperationException($"Cannot convert {_tag} to BigInt.");
     }
 
     /// <summary>

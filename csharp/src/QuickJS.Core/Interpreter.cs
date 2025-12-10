@@ -541,7 +541,7 @@ public sealed class Interpreter
 
     /// <summary>
     /// Addition: pops two values, pushes their sum.
-    /// Handles int + int, float + float, and string concatenation.
+    /// Handles int + int, float + float, BigInt + BigInt, and string concatenation.
     /// </summary>
     public void Add()
     {
@@ -554,6 +554,23 @@ public sealed class Interpreter
         var op2 = _stack[_stackPointer - 1];
         var op1 = _stack[_stackPointer - 2];
         _stackPointer--;
+
+        // BigInt arithmetic
+        if (op1.IsBigInt && op2.IsBigInt)
+        {
+            var b1 = op1.AsBigInt();
+            var b2 = op2.AsBigInt();
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(b1 + b2);
+            return;
+        }
+
+        // Cannot mix BigInt with other types in arithmetic
+        if (op1.IsBigInt || op2.IsBigInt)
+        {
+            _context.ThrowTypeError("Cannot mix BigInt and other types, use explicit conversions");
+            _stack[_stackPointer - 1] = JSValue.Exception;
+            return;
+        }
 
         // Fast path: both integers
         if (op1.IsInt && op2.IsInt)
@@ -626,6 +643,23 @@ public sealed class Interpreter
         var op1 = _stack[_stackPointer - 2];
         _stackPointer--;
 
+        // BigInt arithmetic
+        if (op1.IsBigInt && op2.IsBigInt)
+        {
+            var b1 = op1.AsBigInt();
+            var b2 = op2.AsBigInt();
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(b1 - b2);
+            return;
+        }
+
+        // Cannot mix BigInt with other types
+        if (op1.IsBigInt || op2.IsBigInt)
+        {
+            _context.ThrowTypeError("Cannot mix BigInt and other types, use explicit conversions");
+            _stack[_stackPointer - 1] = JSValue.Exception;
+            return;
+        }
+
         // Fast path: both integers
         if (op1.IsInt && op2.IsInt)
         {
@@ -662,6 +696,23 @@ public sealed class Interpreter
         var op1 = _stack[_stackPointer - 2];
         _stackPointer--;
 
+        // BigInt arithmetic
+        if (op1.IsBigInt && op2.IsBigInt)
+        {
+            var b1 = op1.AsBigInt();
+            var b2 = op2.AsBigInt();
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(b1 * b2);
+            return;
+        }
+
+        // Cannot mix BigInt with other types
+        if (op1.IsBigInt || op2.IsBigInt)
+        {
+            _context.ThrowTypeError("Cannot mix BigInt and other types, use explicit conversions");
+            _stack[_stackPointer - 1] = JSValue.Exception;
+            return;
+        }
+
         // Fast path: both integers
         if (op1.IsInt && op2.IsInt)
         {
@@ -690,6 +741,7 @@ public sealed class Interpreter
     /// <summary>
     /// Division: pops two values, pushes their quotient.
     /// Always returns a double (JavaScript division is always floating-point).
+    /// For BigInt, returns a BigInt (truncated toward zero).
     /// </summary>
     public void Div()
     {
@@ -702,6 +754,29 @@ public sealed class Interpreter
         var op2 = _stack[_stackPointer - 1];
         var op1 = _stack[_stackPointer - 2];
         _stackPointer--;
+
+        // BigInt division
+        if (op1.IsBigInt && op2.IsBigInt)
+        {
+            var b1 = op1.AsBigInt();
+            var b2 = op2.AsBigInt();
+            if (b2.IsZero)
+            {
+                _context.ThrowRangeError("Division by zero");
+                _stack[_stackPointer - 1] = JSValue.Exception;
+                return;
+            }
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(JSBigInt.Divide(b1, b2));
+            return;
+        }
+
+        // Cannot mix BigInt with other types
+        if (op1.IsBigInt || op2.IsBigInt)
+        {
+            _context.ThrowTypeError("Cannot mix BigInt and other types");
+            _stack[_stackPointer - 1] = JSValue.Exception;
+            return;
+        }
 
         double d1 = JSValueConversion.ToNumber(op1);
         double d2 = JSValueConversion.ToNumber(op2);
@@ -722,6 +797,29 @@ public sealed class Interpreter
         var op2 = _stack[_stackPointer - 1];
         var op1 = _stack[_stackPointer - 2];
         _stackPointer--;
+
+        // BigInt modulo
+        if (op1.IsBigInt && op2.IsBigInt)
+        {
+            var b1 = op1.AsBigInt();
+            var b2 = op2.AsBigInt();
+            if (b2.IsZero)
+            {
+                _context.ThrowRangeError("Division by zero");
+                _stack[_stackPointer - 1] = JSValue.Exception;
+                return;
+            }
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(JSBigInt.Mod(b1, b2));
+            return;
+        }
+
+        // Cannot mix BigInt with other types
+        if (op1.IsBigInt || op2.IsBigInt)
+        {
+            _context.ThrowTypeError("Cannot mix BigInt and other types");
+            _stack[_stackPointer - 1] = JSValue.Exception;
+            return;
+        }
 
         // Fast path: both positive integers
         if (op1.IsInt && op2.IsInt)
@@ -755,6 +853,29 @@ public sealed class Interpreter
         var op2 = _stack[_stackPointer - 1];
         var op1 = _stack[_stackPointer - 2];
         _stackPointer--;
+
+        // BigInt power
+        if (op1.IsBigInt && op2.IsBigInt)
+        {
+            var b1 = op1.AsBigInt();
+            var b2 = op2.AsBigInt();
+            if (b2.IsNegative)
+            {
+                _context.ThrowRangeError("Exponent must be non-negative");
+                _stack[_stackPointer - 1] = JSValue.Exception;
+                return;
+            }
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(JSBigInt.Pow(b1, b2.ToInt32()));
+            return;
+        }
+
+        // Cannot mix BigInt with other types
+        if (op1.IsBigInt || op2.IsBigInt)
+        {
+            _context.ThrowTypeError("Cannot mix BigInt and other types");
+            _stack[_stackPointer - 1] = JSValue.Exception;
+            return;
+        }
 
         double d1 = JSValueConversion.ToNumber(op1);
         double d2 = JSValueConversion.ToNumber(op2);
@@ -792,6 +913,14 @@ public sealed class Interpreter
         }
 
         var op = _stack[_stackPointer - 1];
+
+        // BigInt negation
+        if (op.IsBigInt)
+        {
+            var b = op.AsBigInt();
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(JSBigInt.Neg(b));
+            return;
+        }
 
         if (op.IsInt)
         {
@@ -871,6 +1000,111 @@ public sealed class Interpreter
         _stack[_stackPointer - 1] = JSValue.FromDouble(d - 1);
     }
 
+    /// <summary>
+    /// Converts the top value to BigInt.
+    /// </summary>
+    public void ToBigIntOp()
+    {
+        if (_stackPointer < 1)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var op = _stack[_stackPointer - 1];
+
+        // Already a BigInt - nothing to do
+        if (op.IsBigInt)
+            return;
+
+        // Integer - convert directly
+        if (op.IsInt)
+        {
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(op.ToInt32());
+            return;
+        }
+
+        _context.ThrowTypeError("Cannot convert to BigInt");
+        _stack[_stackPointer - 1] = JSValue.Exception;
+    }
+
+    /// <summary>
+    /// typeof operator: Returns the type string for a value.
+    /// </summary>
+    public void TypeOfOp()
+    {
+        if (_stackPointer < 1)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var val = _stack[_stackPointer - 1];
+        string typeStr = GetTypeOfString(val);
+        _stack[_stackPointer - 1] = JSValue.FromString(typeStr);
+    }
+
+    /// <summary>
+    /// typeof === 'undefined' check.
+    /// </summary>
+    public void TypeOfIsUndefinedOp()
+    {
+        if (_stackPointer < 1)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var val = _stack[_stackPointer - 1];
+        _stack[_stackPointer - 1] = JSValue.FromBoolean(val.IsUndefined);
+    }
+
+    /// <summary>
+    /// typeof === 'function' check.
+    /// </summary>
+    public void TypeOfIsFunctionOp()
+    {
+        if (_stackPointer < 1)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var val = _stack[_stackPointer - 1];
+        bool isFunction = val.IsObject && val.AsObject() is JSFunction;
+        _stack[_stackPointer - 1] = JSValue.FromBoolean(isFunction);
+    }
+
+    /// <summary>
+    /// Gets the JavaScript typeof string for a value.
+    /// </summary>
+    private static string GetTypeOfString(JSValue val)
+    {
+        if (val.IsUndefined)
+            return "undefined";
+        if (val.IsNull)
+            return "object"; // typeof null === "object" (historical quirk)
+        if (val.IsBool)
+            return "boolean";
+        if (val.IsNumber)
+            return "number";
+        if (val.IsString)
+            return "string";
+        if (val.IsSymbol)
+            return "symbol";
+        if (val.IsBigInt)
+            return "bigint";
+        if (val.IsObject)
+        {
+            // Check if it's a function
+            var obj = val.AsObject();
+            if (obj is JSFunction)
+                return "function";
+            return "object";
+        }
+        return "undefined";
+    }
+
     #endregion
 
     #region Bitwise Operations
@@ -887,6 +1121,15 @@ public sealed class Interpreter
         }
 
         var op = _stack[_stackPointer - 1];
+        
+        // BigInt NOT
+        if (op.IsBigInt)
+        {
+            var b = op.AsBigInt();
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(JSBigInt.Not(b));
+            return;
+        }
+
         int val = JSValueConversion.ToInt32(op);
         _stack[_stackPointer - 1] = JSValue.FromInt32(~val);
     }
@@ -905,6 +1148,23 @@ public sealed class Interpreter
         var op2 = _stack[_stackPointer - 1];
         var op1 = _stack[_stackPointer - 2];
         _stackPointer--;
+
+        // BigInt AND
+        if (op1.IsBigInt && op2.IsBigInt)
+        {
+            var b1 = op1.AsBigInt();
+            var b2 = op2.AsBigInt();
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(JSBigInt.And(b1, b2));
+            return;
+        }
+
+        // Cannot mix BigInt with other types
+        if (op1.IsBigInt || op2.IsBigInt)
+        {
+            _context.ThrowTypeError("Cannot mix BigInt and other types");
+            _stack[_stackPointer - 1] = JSValue.Exception;
+            return;
+        }
 
         int v1 = JSValueConversion.ToInt32(op1);
         int v2 = JSValueConversion.ToInt32(op2);
@@ -926,6 +1186,23 @@ public sealed class Interpreter
         var op1 = _stack[_stackPointer - 2];
         _stackPointer--;
 
+        // BigInt OR
+        if (op1.IsBigInt && op2.IsBigInt)
+        {
+            var b1 = op1.AsBigInt();
+            var b2 = op2.AsBigInt();
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(JSBigInt.Or(b1, b2));
+            return;
+        }
+
+        // Cannot mix BigInt with other types
+        if (op1.IsBigInt || op2.IsBigInt)
+        {
+            _context.ThrowTypeError("Cannot mix BigInt and other types");
+            _stack[_stackPointer - 1] = JSValue.Exception;
+            return;
+        }
+
         int v1 = JSValueConversion.ToInt32(op1);
         int v2 = JSValueConversion.ToInt32(op2);
         _stack[_stackPointer - 1] = JSValue.FromInt32(v1 | v2);
@@ -946,6 +1223,23 @@ public sealed class Interpreter
         var op1 = _stack[_stackPointer - 2];
         _stackPointer--;
 
+        // BigInt XOR
+        if (op1.IsBigInt && op2.IsBigInt)
+        {
+            var b1 = op1.AsBigInt();
+            var b2 = op2.AsBigInt();
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(JSBigInt.Xor(b1, b2));
+            return;
+        }
+
+        // Cannot mix BigInt with other types
+        if (op1.IsBigInt || op2.IsBigInt)
+        {
+            _context.ThrowTypeError("Cannot mix BigInt and other types");
+            _stack[_stackPointer - 1] = JSValue.Exception;
+            return;
+        }
+
         int v1 = JSValueConversion.ToInt32(op1);
         int v2 = JSValueConversion.ToInt32(op2);
         _stack[_stackPointer - 1] = JSValue.FromInt32(v1 ^ v2);
@@ -965,6 +1259,23 @@ public sealed class Interpreter
         var op2 = _stack[_stackPointer - 1];
         var op1 = _stack[_stackPointer - 2];
         _stackPointer--;
+
+        // BigInt left shift
+        if (op1.IsBigInt && op2.IsBigInt)
+        {
+            var b1 = op1.AsBigInt();
+            var b2 = op2.AsBigInt();
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(JSBigInt.LeftShift(b1, b2.ToInt32()));
+            return;
+        }
+
+        // Cannot mix BigInt with other types
+        if (op1.IsBigInt || op2.IsBigInt)
+        {
+            _context.ThrowTypeError("Cannot mix BigInt and other types");
+            _stack[_stackPointer - 1] = JSValue.Exception;
+            return;
+        }
 
         int v1 = JSValueConversion.ToInt32(op1);
         uint v2 = JSValueConversion.ToUInt32(op2);
@@ -987,6 +1298,23 @@ public sealed class Interpreter
         var op1 = _stack[_stackPointer - 2];
         _stackPointer--;
 
+        // BigInt right shift
+        if (op1.IsBigInt && op2.IsBigInt)
+        {
+            var b1 = op1.AsBigInt();
+            var b2 = op2.AsBigInt();
+            _stack[_stackPointer - 1] = JSValue.FromBigInt(JSBigInt.RightShift(b1, b2.ToInt32()));
+            return;
+        }
+
+        // Cannot mix BigInt with other types
+        if (op1.IsBigInt || op2.IsBigInt)
+        {
+            _context.ThrowTypeError("Cannot mix BigInt and other types");
+            _stack[_stackPointer - 1] = JSValue.Exception;
+            return;
+        }
+
         int v1 = JSValueConversion.ToInt32(op1);
         uint v2 = JSValueConversion.ToUInt32(op2);
         int shift = (int)(v2 & 0x1F);
@@ -995,6 +1323,7 @@ public sealed class Interpreter
 
     /// <summary>
     /// Unsigned right shift: a >>> b
+    /// BigInt does not support unsigned right shift.
     /// </summary>
     public void Shr()
     {
@@ -1007,6 +1336,14 @@ public sealed class Interpreter
         var op2 = _stack[_stackPointer - 1];
         var op1 = _stack[_stackPointer - 2];
         _stackPointer--;
+
+        // BigInt does not support unsigned right shift
+        if (op1.IsBigInt || op2.IsBigInt)
+        {
+            _context.ThrowTypeError("BigInts have no unsigned right shift");
+            _stack[_stackPointer - 1] = JSValue.Exception;
+            return;
+        }
 
         uint v1 = JSValueConversion.ToUInt32(op1);
         uint v2 = JSValueConversion.ToUInt32(op2);
@@ -1175,14 +1512,71 @@ public sealed class Interpreter
             return JSValue.FromBoolean(string.Compare(sx, sy, StringComparison.Ordinal) < 0);
         }
 
-        // Numeric comparison
-        double nx = JSValueConversion.ToNumber(px);
-        double ny = JSValueConversion.ToNumber(py);
+        // BigInt comparisons
+        if (px.IsBigInt && py.IsBigInt)
+        {
+            return JSValue.FromBoolean(JSBigInt.Compare(px.AsBigInt(), py.AsBigInt()) < 0);
+        }
 
-        if (double.IsNaN(nx) || double.IsNaN(ny))
+        if (px.IsBigInt && py.IsString)
+        {
+            if (JSBigInt.TryFromString(py.ToString()!, out var bigY))
+            {
+                return JSValue.FromBoolean(JSBigInt.Compare(px.AsBigInt(), bigY) < 0);
+            }
+            return null; // Cannot compare
+        }
+
+        if (px.IsString && py.IsBigInt)
+        {
+            if (JSBigInt.TryFromString(px.ToString()!, out var bigX))
+            {
+                return JSValue.FromBoolean(JSBigInt.Compare(bigX, py.AsBigInt()) < 0);
+            }
+            return null; // Cannot compare
+        }
+
+        // BigInt vs Number
+        if (px.IsBigInt && py.IsNumber)
+        {
+            double ny = py.ToDouble();
+            if (double.IsNaN(ny)) return null;
+            if (double.IsPositiveInfinity(ny)) return JSValue.True;
+            if (double.IsNegativeInfinity(ny)) return JSValue.False;
+            // Compare BigInt to truncated double
+            var bigX = px.AsBigInt();
+            var bigY = JSBigInt.FromDouble(Math.Truncate(ny));
+            int cmp = JSBigInt.Compare(bigX, bigY);
+            if (cmp < 0) return JSValue.True;
+            if (cmp > 0) return JSValue.False;
+            // Equal as integers, check fractional part
+            return JSValue.FromBoolean(ny > Math.Truncate(ny));
+        }
+
+        if (px.IsNumber && py.IsBigInt)
+        {
+            double nx = px.ToDouble();
+            if (double.IsNaN(nx)) return null;
+            if (double.IsNegativeInfinity(nx)) return JSValue.True;
+            if (double.IsPositiveInfinity(nx)) return JSValue.False;
+            // Compare truncated double to BigInt
+            var bigX = JSBigInt.FromDouble(Math.Truncate(nx));
+            var bigY = py.AsBigInt();
+            int cmp = JSBigInt.Compare(bigX, bigY);
+            if (cmp < 0) return JSValue.True;
+            if (cmp > 0) return JSValue.False;
+            // Equal as integers, check fractional part
+            return JSValue.FromBoolean(nx < Math.Truncate(nx));
+        }
+
+        // Numeric comparison
+        double fnx = JSValueConversion.ToNumber(px);
+        double fny = JSValueConversion.ToNumber(py);
+
+        if (double.IsNaN(fnx) || double.IsNaN(fny))
             return null;
 
-        return JSValue.FromBoolean(nx < ny);
+        return JSValue.FromBoolean(fnx < fny);
     }
 
     /// <summary>
@@ -1284,6 +1678,42 @@ public sealed class Interpreter
             return JSValueConversion.ToNumber(x) == y.ToDouble();
         }
 
+        // BigInt == Number
+        if (x.IsBigInt && y.IsNumber)
+        {
+            double dy = y.ToDouble();
+            if (double.IsNaN(dy) || double.IsInfinity(dy)) return false;
+            // Check if dy is an integer
+            if (dy != Math.Truncate(dy)) return false;
+            return JSBigInt.Equals(x.AsBigInt(), JSBigInt.FromDouble(dy));
+        }
+        if (x.IsNumber && y.IsBigInt)
+        {
+            double dx = x.ToDouble();
+            if (double.IsNaN(dx) || double.IsInfinity(dx)) return false;
+            // Check if dx is an integer
+            if (dx != Math.Truncate(dx)) return false;
+            return JSBigInt.Equals(JSBigInt.FromDouble(dx), y.AsBigInt());
+        }
+
+        // BigInt == String
+        if (x.IsBigInt && y.IsString)
+        {
+            if (JSBigInt.TryFromString(y.ToString()!, out var bigY))
+            {
+                return JSBigInt.Equals(x.AsBigInt(), bigY);
+            }
+            return false;
+        }
+        if (x.IsString && y.IsBigInt)
+        {
+            if (JSBigInt.TryFromString(x.ToString()!, out var bigX))
+            {
+                return JSBigInt.Equals(bigX, y.AsBigInt());
+            }
+            return false;
+        }
+
         // Boolean -> Number
         if (x.IsBool)
         {
@@ -1295,11 +1725,11 @@ public sealed class Interpreter
         }
 
         // Object == primitive -> compare ToPrimitive(object) with primitive
-        if ((x.IsString || x.IsNumber) && y.IsObject)
+        if ((x.IsString || x.IsNumber || x.IsBigInt) && y.IsObject)
         {
             return AbstractEqualityComparison(x, ToPrimitive(y));
         }
-        if (x.IsObject && (y.IsString || y.IsNumber))
+        if (x.IsObject && (y.IsString || y.IsNumber || y.IsBigInt))
         {
             return AbstractEqualityComparison(ToPrimitive(x), y);
         }
@@ -1340,6 +1770,12 @@ public sealed class Interpreter
             if (double.IsNaN(dx) || double.IsNaN(dy))
                 return false;
             return dx == dy;
+        }
+
+        // BigInt comparison
+        if (x.IsBigInt)
+        {
+            return JSBigInt.Equals(x.AsBigInt(), y.AsBigInt());
         }
 
         // String comparison
@@ -2281,6 +2717,22 @@ public sealed class Interpreter
                 return true;
             case OpCode.IsUndefinedOrNull:
                 IsUndefinedOrNull();
+                return true;
+            
+            // Type operators
+            case OpCode.TypeOf:
+                TypeOfOp();
+                return true;
+            case OpCode.TypeOfIsUndefined:
+                TypeOfIsUndefinedOp();
+                return true;
+            case OpCode.TypeOfIsFunction:
+                TypeOfIsFunctionOp();
+                return true;
+            
+            // Type conversion
+            case OpCode.ToBigInt:
+                ToBigIntOp();
                 return true;
 
             // Reference creation
