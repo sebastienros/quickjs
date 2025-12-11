@@ -357,4 +357,172 @@ public class AtomTableTests
     }
 
     #endregion
+
+    #region ReadOnlySpan<char> Overload Tests
+
+    [Fact]
+    public void AtomTable_GetOrCreateAtom_Span_CreatesNewAtom()
+    {
+        var table = new AtomTable();
+        ReadOnlySpan<char> span = "newIdentifier".AsSpan();
+
+        var atom = table.GetOrCreateAtom(span);
+
+        Assert.False(atom.IsEmpty);
+        Assert.Equal("newIdentifier", table.GetString(atom));
+    }
+
+    [Fact]
+    public void AtomTable_GetOrCreateAtom_Span_ReturnsSameAtomForSameSpan()
+    {
+        var table = new AtomTable();
+        ReadOnlySpan<char> span1 = "testValue".AsSpan();
+        ReadOnlySpan<char> span2 = "testValue".AsSpan();
+
+        var atom1 = table.GetOrCreateAtom(span1);
+        var atom2 = table.GetOrCreateAtom(span2);
+
+        Assert.Equal(atom1, atom2);
+    }
+
+    [Fact]
+    public void AtomTable_GetOrCreateAtom_Span_MatchesStringOverload()
+    {
+        var table = new AtomTable();
+        string str = "matchingValue";
+        ReadOnlySpan<char> span = str.AsSpan();
+
+        var atomFromString = table.GetOrCreateAtom(str);
+        var atomFromSpan = table.GetOrCreateAtom(span);
+
+        Assert.Equal(atomFromString, atomFromSpan);
+    }
+
+    [Fact]
+    public void AtomTable_GetOrCreateAtom_Span_FindsBuiltInAtom()
+    {
+        var table = new AtomTable();
+        ReadOnlySpan<char> span = "length".AsSpan();
+
+        var atom = table.GetOrCreateAtom(span);
+
+        Assert.Equal(table.Length, atom);
+    }
+
+    [Fact]
+    public void AtomTable_TryGetAtom_Span_FindsExistingAtom()
+    {
+        var table = new AtomTable();
+        table.GetOrCreateAtom("existingValue");
+        ReadOnlySpan<char> span = "existingValue".AsSpan();
+
+        bool found = table.TryGetAtom(span, out var atom);
+
+        Assert.True(found);
+        Assert.False(atom.IsEmpty);
+    }
+
+    [Fact]
+    public void AtomTable_TryGetAtom_Span_ReturnsFalseForMissing()
+    {
+        var table = new AtomTable();
+        ReadOnlySpan<char> span = "nonExistentValue".AsSpan();
+
+        bool found = table.TryGetAtom(span, out var atom);
+
+        Assert.False(found);
+        Assert.True(atom.IsEmpty);
+    }
+
+    [Fact]
+    public void AtomTable_GetOrCreateString_ReturnsInternedString()
+    {
+        var table = new AtomTable();
+        ReadOnlySpan<char> span = "internedString".AsSpan();
+
+        string result = table.GetOrCreateString(span);
+
+        Assert.Equal("internedString", result);
+    }
+
+    [Fact]
+    public void AtomTable_GetOrCreateString_ReturnsSameInstanceForSameSpan()
+    {
+        var table = new AtomTable();
+        ReadOnlySpan<char> span1 = "sameString".AsSpan();
+        ReadOnlySpan<char> span2 = "sameString".AsSpan();
+
+        string result1 = table.GetOrCreateString(span1);
+        string result2 = table.GetOrCreateString(span2);
+
+        Assert.Same(result1, result2);
+    }
+
+    [Fact]
+    public void AtomTable_GetOrCreateString_ReturnsBuiltInString()
+    {
+        var table = new AtomTable();
+        ReadOnlySpan<char> span = "prototype".AsSpan();
+
+        string result = table.GetOrCreateString(span);
+
+        Assert.Equal("prototype", result);
+        // Verify it's the same instance as what we'd get from the built-in atom
+        string builtIn = table.GetString(table.Prototype);
+        Assert.Same(builtIn, result);
+    }
+
+    [Fact]
+    public void AtomTable_TryGetString_Span_FindsExistingString()
+    {
+        var table = new AtomTable();
+        table.GetOrCreateAtom("existingString");
+        ReadOnlySpan<char> span = "existingString".AsSpan();
+
+        bool found = table.TryGetString(span, out var str);
+
+        Assert.True(found);
+        Assert.Equal("existingString", str);
+    }
+
+    [Fact]
+    public void AtomTable_TryGetString_Span_ReturnsFalseForMissing()
+    {
+        var table = new AtomTable();
+        ReadOnlySpan<char> span = "missingString".AsSpan();
+
+        bool found = table.TryGetString(span, out var str);
+
+        Assert.False(found);
+        Assert.Null(str);
+    }
+
+    [Fact]
+    public void AtomTable_GetOrCreateAtom_Span_WorksWithSlicedSpan()
+    {
+        var table = new AtomTable();
+        string source = "prefix_identifier_suffix";
+        ReadOnlySpan<char> span = source.AsSpan(7, 10); // "identifier"
+
+        var atom = table.GetOrCreateAtom(span);
+        string result = table.GetString(atom);
+
+        Assert.Equal("identifier", result);
+    }
+
+    [Fact]
+    public void AtomTable_GetOrCreateString_WorksWithSlicedSpan()
+    {
+        var table = new AtomTable();
+        string source = "xxxlengthabc";
+        ReadOnlySpan<char> span = source.AsSpan(3, 6); // "length"
+
+        string result = table.GetOrCreateString(span);
+
+        Assert.Equal("length", result);
+        // Should return the built-in interned string
+        Assert.Same(table.GetString(table.Length), result);
+    }
+
+    #endregion
 }

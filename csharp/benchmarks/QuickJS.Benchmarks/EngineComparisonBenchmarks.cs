@@ -1,9 +1,10 @@
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
+using Microsoft.VSDiagnostics;
 
 namespace QuickJS.Benchmarks;
 
 [MemoryDiagnoser]
+//[CPUUsageDiagnoser]
 public class EngineComparisonBenchmarks
 {
     private JSRuntime _quickJsRuntime = null!;

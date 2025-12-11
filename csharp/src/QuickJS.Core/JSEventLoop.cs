@@ -71,12 +71,15 @@ internal class JSTimer
 /// <summary>
 /// Simple event loop implementation for managing timers and pending jobs.
 /// </summary>
+/// <remarks>
+/// This class is not thread-safe. It is owned by a <see cref="JSContext"/> which
+/// follows the single-threaded execution model of JavaScript runtimes.
+/// </remarks>
 public class JSEventLoop
 {
     private readonly JSContext _context;
     private readonly Dictionary<int, JSTimer> _timers = new Dictionary<int, JSTimer>();
     private readonly Queue<Action> _microtasks = new Queue<Action>();
-    private readonly object _lock = new object();
     private bool _running;
 
     /// <summary>
@@ -87,30 +90,12 @@ public class JSEventLoop
     /// <summary>
     /// Gets the number of active timers.
     /// </summary>
-    public int ActiveTimerCount
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _timers.Count;
-            }
-        }
-    }
+    public int ActiveTimerCount => _timers.Count;
 
     /// <summary>
     /// Gets the number of pending microtasks.
     /// </summary>
-    public int PendingMicrotaskCount
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _microtasks.Count;
-            }
-        }
-    }
+    public int PendingMicrotaskCount => _microtasks.Count;
 
     internal JSEventLoop(JSContext context)
     {
@@ -127,10 +112,7 @@ public class JSEventLoop
     public int SetTimeout(JSFunction callback, int delay, params JSValue[] arguments)
     {
         var timer = new JSTimer(callback, arguments, delay, isInterval: false);
-        lock (_lock)
-        {
-            _timers[timer.Id] = timer;
-        }
+        _timers[timer.Id] = timer;
         return timer.Id;
     }
 
@@ -140,13 +122,10 @@ public class JSEventLoop
     /// <param name="timerId">The timer identifier returned by SetTimeout.</param>
     public void ClearTimeout(int timerId)
     {
-        lock (_lock)
+        if (_timers.TryGetValue(timerId, out var timer))
         {
-            if (_timers.TryGetValue(timerId, out var timer))
-            {
-                timer.IsCancelled = true;
-                _timers.Remove(timerId);
-            }
+            timer.IsCancelled = true;
+            _timers.Remove(timerId);
         }
     }
 
@@ -160,10 +139,7 @@ public class JSEventLoop
     public int SetInterval(JSFunction callback, int interval, params JSValue[] arguments)
     {
         var timer = new JSTimer(callback, arguments, interval, isInterval: true);
-        lock (_lock)
-        {
-            _timers[timer.Id] = timer;
-        }
+        _timers[timer.Id] = timer;
         return timer.Id;
     }
 
@@ -183,10 +159,7 @@ public class JSEventLoop
     /// <param name="task">The task to enqueue.</param>
     public void EnqueueMicrotask(Action task)
     {
-        lock (_lock)
-        {
-            _microtasks.Enqueue(task);
-        }
+        _microtasks.Enqueue(task);
     }
 
     /// <summary>
@@ -194,15 +167,9 @@ public class JSEventLoop
     /// </summary>
     public void ProcessMicrotasks()
     {
-        while (true)
+        while (_microtasks.Count > 0)
         {
-            Action? task;
-            lock (_lock)
-            {
-                if (_microtasks.Count == 0)
-                    break;
-                task = _microtasks.Dequeue();
-            }
+            var task = _microtasks.Dequeue();
             task?.Invoke();
         }
     }
@@ -231,20 +198,17 @@ public class JSEventLoop
                 JSTimer? timerToExecute = null;
                 long currentTicks = DateTime.UtcNow.Ticks;
 
-                lock (_lock)
-                {
-                    if (_timers.Count == 0 && _microtasks.Count == 0)
-                        break;
+                if (_timers.Count == 0 && _microtasks.Count == 0)
+                    break;
 
-                    // Find the next timer that's ready to execute
-                    foreach (var timer in _timers.Values)
+                // Find the next timer that's ready to execute
+                foreach (var timer in _timers.Values)
+                {
+                    if (!timer.IsCancelled && timer.NextExecutionTicks <= currentTicks)
                     {
-                        if (!timer.IsCancelled && timer.NextExecutionTicks <= currentTicks)
+                        if (timerToExecute == null || timer.NextExecutionTicks < timerToExecute.NextExecutionTicks)
                         {
-                            if (timerToExecute == null || timer.NextExecutionTicks < timerToExecute.NextExecutionTicks)
-                            {
-                                timerToExecute = timer;
-                            }
+                            timerToExecute = timer;
                         }
                     }
                 }
@@ -262,19 +226,16 @@ public class JSEventLoop
                         // Timer callbacks should not throw - swallow the exception
                     }
 
-                    lock (_lock)
+                    if (timerToExecute.IsInterval && !timerToExecute.IsCancelled)
                     {
-                        if (timerToExecute.IsInterval && !timerToExecute.IsCancelled)
-                        {
-                            // Reschedule the interval
-                            timerToExecute.NextExecutionTicks = DateTime.UtcNow.Ticks + 
-                                (long)timerToExecute.Delay * TimeSpan.TicksPerMillisecond;
-                        }
-                        else
-                        {
-                            // Remove one-shot timers
-                            _timers.Remove(timerToExecute.Id);
-                        }
+                        // Reschedule the interval
+                        timerToExecute.NextExecutionTicks = DateTime.UtcNow.Ticks + 
+                            (long)timerToExecute.Delay * TimeSpan.TicksPerMillisecond;
+                    }
+                    else
+                    {
+                        // Remove one-shot timers
+                        _timers.Remove(timerToExecute.Id);
                     }
 
                     // Process any microtasks that may have been enqueued by the callback
@@ -283,31 +244,28 @@ public class JSEventLoop
                 else
                 {
                     // No timer ready yet - check if we should wait or exit
-                    lock (_lock)
+                    if (_timers.Count == 0)
+                        break;
+
+                    // Find the next timer
+                    long nextTicks = long.MaxValue;
+                    foreach (var timer in _timers.Values)
                     {
-                        if (_timers.Count == 0)
-                            break;
-
-                        // Find the next timer
-                        long nextTicks = long.MaxValue;
-                        foreach (var timer in _timers.Values)
+                        if (!timer.IsCancelled && timer.NextExecutionTicks < nextTicks)
                         {
-                            if (!timer.IsCancelled && timer.NextExecutionTicks < nextTicks)
-                            {
-                                nextTicks = timer.NextExecutionTicks;
-                            }
+                            nextTicks = timer.NextExecutionTicks;
                         }
+                    }
 
-                        if (nextTicks == long.MaxValue)
-                            break;
+                    if (nextTicks == long.MaxValue)
+                        break;
 
-                        // Wait for the timer (with a small sleep to avoid busy-waiting)
-                        long waitMs = (nextTicks - currentTicks) / TimeSpan.TicksPerMillisecond;
-                        if (waitMs > 0)
-                        {
-                            // Sleep for at most 1ms to allow responsive cancellation
-                            Thread.Sleep(Math.Min((int)waitMs, 1));
-                        }
+                    // Wait for the timer (with a small sleep to avoid busy-waiting)
+                    long waitMs = (nextTicks - currentTicks) / TimeSpan.TicksPerMillisecond;
+                    if (waitMs > 0)
+                    {
+                        // Sleep for at most 1ms to allow responsive cancellation
+                        Thread.Sleep(Math.Min((int)waitMs, 1));
                     }
                 }
             }
@@ -328,33 +286,24 @@ public class JSEventLoop
     {
         // Process microtasks
         bool didWork = false;
-        while (true)
+        while (_microtasks.Count > 0)
         {
-            Action? task;
-            lock (_lock)
-            {
-                if (_microtasks.Count == 0)
-                    break;
-                task = _microtasks.Dequeue();
-                didWork = true;
-            }
+            var task = _microtasks.Dequeue();
             task?.Invoke();
+            didWork = true;
         }
 
         // Check for a ready timer
         JSTimer? timerToExecute = null;
         long currentTicks = DateTime.UtcNow.Ticks;
 
-        lock (_lock)
+        foreach (var timer in _timers.Values)
         {
-            foreach (var timer in _timers.Values)
+            if (!timer.IsCancelled && timer.NextExecutionTicks <= currentTicks)
             {
-                if (!timer.IsCancelled && timer.NextExecutionTicks <= currentTicks)
+                if (timerToExecute == null || timer.NextExecutionTicks < timerToExecute.NextExecutionTicks)
                 {
-                    if (timerToExecute == null || timer.NextExecutionTicks < timerToExecute.NextExecutionTicks)
-                    {
-                        timerToExecute = timer;
-                    }
+                    timerToExecute = timer;
                 }
             }
         }
@@ -371,17 +320,14 @@ public class JSEventLoop
                 // Swallow
             }
 
-            lock (_lock)
+            if (timerToExecute.IsInterval && !timerToExecute.IsCancelled)
             {
-                if (timerToExecute.IsInterval && !timerToExecute.IsCancelled)
-                {
-                    timerToExecute.NextExecutionTicks = DateTime.UtcNow.Ticks + 
-                        (long)timerToExecute.Delay * TimeSpan.TicksPerMillisecond;
-                }
-                else
-                {
-                    _timers.Remove(timerToExecute.Id);
-                }
+                timerToExecute.NextExecutionTicks = DateTime.UtcNow.Ticks + 
+                    (long)timerToExecute.Delay * TimeSpan.TicksPerMillisecond;
+            }
+            else
+            {
+                _timers.Remove(timerToExecute.Id);
             }
         }
 
@@ -393,10 +339,7 @@ public class JSEventLoop
     /// </summary>
     public void ClearAllTimers()
     {
-        lock (_lock)
-        {
-            _timers.Clear();
-        }
+        _timers.Clear();
     }
 
     /// <summary>
@@ -404,23 +347,11 @@ public class JSEventLoop
     /// </summary>
     public void ClearAllMicrotasks()
     {
-        lock (_lock)
-        {
-            _microtasks.Clear();
-        }
+        _microtasks.Clear();
     }
 
     /// <summary>
     /// Returns whether there are pending jobs (timers or microtasks).
     /// </summary>
-    public bool HasPendingJobs
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _timers.Count > 0 || _microtasks.Count > 0;
-            }
-        }
-    }
+    public bool HasPendingJobs => _timers.Count > 0 || _microtasks.Count > 0;
 }

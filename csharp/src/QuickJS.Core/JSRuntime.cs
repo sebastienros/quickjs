@@ -1,6 +1,7 @@
 // Licensed under the MIT License.
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
@@ -23,6 +24,12 @@ namespace QuickJS;
 /// <item><description>The job queue for Promise microtasks</description></item>
 /// <item><description>Interrupt handling for long-running scripts</description></item>
 /// </list>
+/// <para>
+/// <b>Threading Model:</b> A <see cref="JSRuntime"/> instance and all its associated
+/// <see cref="JSContext"/> instances must be used from a single thread only.
+/// The runtime is not thread-safe. For multi-threaded scenarios, create separate
+/// runtime instances per thread.
+/// </para>
 /// <para>
 /// In QuickJS, the relationship between runtime and context is:
 /// </para>
@@ -91,9 +98,11 @@ public sealed class JSRuntime : IDisposable
     // Class registry
     private readonly List<JSClassDef> _classes;
     private readonly Dictionary<string, JSClassId> _classNameToId;
+    private readonly ReaderWriterLockSlim _classesLock = new ReaderWriterLockSlim();
 
     // List of contexts in this runtime
     private readonly List<JSContext> _contexts;
+    private readonly ReaderWriterLockSlim _contextsLock = new ReaderWriterLockSlim();
 
     // Current exception for the runtime
     private JSValue _currentException = JSValue.Undefined;
@@ -131,7 +140,7 @@ public sealed class JSRuntime : IDisposable
         _atomTable = new AtomTable();
         _classes = new List<JSClassDef>();
         _classNameToId = new Dictionary<string, JSClassId>();
-        _contexts = new List<JSContext>();
+        _contexts = new();
         _jobQueue = new Queue<JSJob>();
 
         // Register standard classes
@@ -150,12 +159,40 @@ public sealed class JSRuntime : IDisposable
     /// <summary>
     /// Gets the number of registered classes.
     /// </summary>
-    public int ClassCount => _classes.Count;
+    public int ClassCount
+    {
+        get
+        {
+            _classesLock.EnterReadLock();
+            try
+            {
+                return _classes.Count;
+            }
+            finally
+            {
+                _classesLock.ExitReadLock();
+            }
+        }
+    }
 
     /// <summary>
     /// Gets the number of contexts using this runtime.
     /// </summary>
-    public int ContextCount => _contexts.Count;
+    public int ContextCount
+    {
+        get
+        {
+            _contextsLock.EnterReadLock();
+            try
+            {
+                return _contexts.Count;
+            }
+            finally
+            {
+                _contextsLock.ExitReadLock();
+            }
+        }
+    }
 
     /// <summary>
     /// Gets or sets the memory limit in bytes. Use <see cref="NoMemoryLimit"/> (-1) for no limit.
@@ -279,7 +316,15 @@ public sealed class JSRuntime : IDisposable
         ThrowIfDisposed();
 
         var context = new JSContext(this);
-        _contexts.Add(context);
+        _contextsLock.EnterWriteLock();
+        try
+        {
+            _contexts.Add(context);
+        }
+        finally
+        {
+            _contextsLock.ExitWriteLock();
+        }
         return context;
     }
 
@@ -290,7 +335,15 @@ public sealed class JSRuntime : IDisposable
     /// <returns><c>true</c> if the context was removed; otherwise, <c>false</c>.</returns>
     internal bool RemoveContext(JSContext context)
     {
-        return _contexts.Remove(context);
+        _contextsLock.EnterWriteLock();
+        try
+        {
+            return _contexts.Remove(context);
+        }
+        finally
+        {
+            _contextsLock.ExitWriteLock();
+        }
     }
 
     /// <summary>
@@ -299,7 +352,15 @@ public sealed class JSRuntime : IDisposable
     /// <returns>An enumerable of contexts.</returns>
     public IEnumerable<JSContext> GetContexts()
     {
-        return _contexts.ToArray(); // Return a copy for thread safety
+        _contextsLock.EnterReadLock();
+        try
+        {
+            return _contexts.ToArray();
+        }
+        finally
+        {
+            _contextsLock.ExitReadLock();
+        }
     }
 
     #endregion
@@ -322,15 +383,23 @@ public sealed class JSRuntime : IDisposable
 
         ThrowIfDisposed();
 
-        if (_classNameToId.ContainsKey(className))
-            throw new InvalidOperationException($"Class '{className}' is already registered.");
+        _classesLock.EnterWriteLock();
+        try
+        {
+            if (_classNameToId.ContainsKey(className))
+                throw new InvalidOperationException($"Class '{className}' is already registered.");
 
-        var classId = (JSClassId)_classes.Count;
-        var classDef = new JSClassDef(classId, className, finalizer, call);
-        _classes.Add(classDef);
-        _classNameToId[className] = classId;
+            var classId = (JSClassId)_classes.Count;
+            var classDef = new JSClassDef(classId, className, finalizer, call);
+            _classes.Add(classDef);
+            _classNameToId[className] = classId;
 
-        return classId;
+            return classId;
+        }
+        finally
+        {
+            _classesLock.ExitWriteLock();
+        }
     }
 
     /// <summary>
@@ -340,10 +409,18 @@ public sealed class JSRuntime : IDisposable
     /// <returns>The class definition, or null if not found.</returns>
     public JSClassDef? GetClass(JSClassId classId)
     {
-        int index = (int)classId;
-        if (index >= 0 && index < _classes.Count)
-            return _classes[index];
-        return null;
+        _classesLock.EnterReadLock();
+        try
+        {
+            int index = (int)classId;
+            if (index >= 0 && index < _classes.Count)
+                return _classes[index];
+            return null;
+        }
+        finally
+        {
+            _classesLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -353,9 +430,17 @@ public sealed class JSRuntime : IDisposable
     /// <returns>The class ID if found; otherwise, <see cref="JSClassId.None"/>.</returns>
     public JSClassId GetClassId(string className)
     {
-        if (_classNameToId.TryGetValue(className, out var classId))
-            return classId;
-        return JSClassId.None;
+        _classesLock.EnterReadLock();
+        try
+        {
+            if (_classNameToId.TryGetValue(className, out var classId))
+                return classId;
+            return JSClassId.None;
+        }
+        finally
+        {
+            _classesLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -448,11 +533,41 @@ public sealed class JSRuntime : IDisposable
 
     #region Memory Management
 
+    // NOTE: RecordAllocation/RecordDeallocation are public API infrastructure for memory limiting.
+    // These methods are intentionally not called automatically from object constructors because:
+    // 1. Estimating managed object sizes accurately in .NET is complex and imprecise
+    // 2. Tracking every allocation would add overhead to the critical path
+    // 3. Deallocation tracking is difficult without custom weak reference handling
+    //
+    // The API is exposed for:
+    // - Users who want to implement custom memory budgets for sandboxed JS execution
+    // - Future integration with explicit allocation sites (ArrayBuffer, large strings, etc.)
+    // - Testing memory limit enforcement behavior
+    //
+    // To enforce memory limits, call RecordAllocation before creating large objects
+    // (e.g., ArrayBuffer, large arrays) and check the return value.
+
     /// <summary>
-    /// Records a memory allocation.
+    /// Records a memory allocation for tracking and limit enforcement.
     /// </summary>
     /// <param name="size">The size of the allocation in bytes.</param>
     /// <returns><c>true</c> if the allocation is allowed; <c>false</c> if it would exceed the memory limit.</returns>
+    /// <remarks>
+    /// <para>
+    /// This method is part of the memory limiting infrastructure. It is not called automatically
+    /// by the runtime for every object allocation because accurately tracking managed memory
+    /// is complex in .NET. Instead, it is intended for:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>Explicit tracking of large allocations (e.g., ArrayBuffer, typed arrays)</description></item>
+    /// <item><description>Custom memory budgets in sandboxed execution scenarios</description></item>
+    /// <item><description>Integration with host applications that need allocation control</description></item>
+    /// </list>
+    /// <para>
+    /// When <see cref="MemoryLimit"/> is set, this method returns <c>false</c> if the allocation
+    /// would exceed the limit, allowing the caller to throw an out-of-memory error.
+    /// </para>
+    /// </remarks>
     public bool RecordAllocation(long size)
     {
         if (size <= 0) return true;
@@ -469,9 +584,14 @@ public sealed class JSRuntime : IDisposable
     }
 
     /// <summary>
-    /// Records a memory deallocation.
+    /// Records a memory deallocation for tracking purposes.
     /// </summary>
     /// <param name="size">The size of the deallocation in bytes.</param>
+    /// <remarks>
+    /// This is the counterpart to <see cref="RecordAllocation"/>. Call this when releasing
+    /// tracked memory (e.g., when an ArrayBuffer is garbage collected or explicitly released).
+    /// See <see cref="RecordAllocation"/> for details on the memory tracking infrastructure.
+    /// </remarks>
     public void RecordDeallocation(long size)
     {
         if (size <= 0) return;
@@ -665,11 +785,28 @@ public sealed class JSRuntime : IDisposable
         _isDisposed = true;
 
         // Dispose all contexts
-        foreach (var context in _contexts.ToArray())
+        JSContext[] contextsCopy;
+        _contextsLock.EnterWriteLock();
+        try
+        {
+            contextsCopy = _contexts.ToArray();
+            _contexts.Clear();
+        }
+        finally
+        {
+            _contextsLock.ExitWriteLock();
+        }
+
+        foreach (var context in contextsCopy)
         {
             context.Dispose();
         }
-        _contexts.Clear();
+
+        // Dispose the contexts lock
+        _contextsLock.Dispose();
+
+        // Dispose the classes lock
+        _classesLock.Dispose();
 
         // Clear the job queue
         _jobQueue.Clear();
@@ -693,8 +830,18 @@ public sealed class JSRuntime : IDisposable
     {
         get
         {
-            var status = _isDisposed ? "Disposed" : $"{_contexts.Count} contexts, {_atomTable.Count} atoms";
-            return $"JSRuntime [{status}]";
+            if (_isDisposed)
+                return "JSRuntime [Disposed]";
+
+            _contextsLock.EnterReadLock();
+            try
+            {
+                return $"JSRuntime [{_contexts.Count} contexts, {_atomTable.Count} atoms]";
+            }
+            finally
+            {
+                _contextsLock.ExitReadLock();
+            }
         }
     }
 

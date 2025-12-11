@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace QuickJS;
 
@@ -18,8 +19,18 @@ namespace QuickJS;
 /// Built-in atoms (keywords, common property names like "length", "prototype", etc.)
 /// are pre-populated during construction. User strings are added dynamically.
 /// </para>
+/// <para>
+/// On .NET 10+, the atom table uses alternate dictionary lookups
+/// to enable span-based lookups without allocating strings, significantly reducing
+/// memory pressure during lexing.
+/// </para>
+/// <para>
+/// Thread Safety: The atom table uses a <see cref="ReaderWriterLockSlim"/> to allow
+/// concurrent reads while protecting writes. Multiple threads can look up atoms
+/// simultaneously, but writes are serialized.
+/// </para>
 /// </remarks>
-public sealed class AtomTable
+public sealed partial class AtomTable : IDisposable
 {
     // String -> Atom mapping for fast lookup
     private readonly Dictionary<string, JSAtom> _stringToAtom;
@@ -27,8 +38,8 @@ public sealed class AtomTable
     // Atom -> String mapping for reverse lookup
     private readonly List<string> _atomToString;
 
-    // Lock for thread safety (optional, but good practice)
-    private readonly object _lock = new object();
+    // Reader-writer lock for thread safety
+    private readonly ReaderWriterLockSlim _lock = new ReaderWriterLockSlim();
 
     /// <summary>
     /// Creates a new atom table with built-in atoms pre-populated.
@@ -41,9 +52,18 @@ public sealed class AtomTable
         // Reserve index 0 as "empty/invalid"
         _atomToString.Add(string.Empty);
 
+        // Initialize platform-specific span lookup (if available)
+        InitializeSpanLookup();
+
         // Pre-populate built-in atoms
         InitializeBuiltInAtoms();
     }
+
+    /// <summary>
+    /// Partial method for platform-specific span lookup initialization.
+    /// Implemented in AtomTable.Net10.cs for .NET 10+.
+    /// </summary>
+    partial void InitializeSpanLookup();
 
     /// <summary>
     /// Gets the total number of atoms in the table (including the empty atom).
@@ -52,9 +72,14 @@ public sealed class AtomTable
     {
         get
         {
-            lock (_lock)
+            _lock.EnterReadLock();
+            try
             {
                 return _atomToString.Count;
+            }
+            finally
+            {
+                _lock.ExitReadLock();
             }
         }
     }
@@ -72,18 +97,37 @@ public sealed class AtomTable
             throw new ArgumentNullException(nameof(str));
         }
 
-        lock (_lock)
+        _lock.EnterUpgradeableReadLock();
+        try
         {
             if (_stringToAtom.TryGetValue(str, out JSAtom existing))
             {
                 return existing;
             }
 
-            uint index = (uint)_atomToString.Count;
-            var atom = new JSAtom(index);
-            _atomToString.Add(str);
-            _stringToAtom[str] = atom;
-            return atom;
+            _lock.EnterWriteLock();
+            try
+            {
+                // Double-check after acquiring write lock
+                if (_stringToAtom.TryGetValue(str, out existing))
+                {
+                    return existing;
+                }
+
+                uint index = (uint)_atomToString.Count;
+                var atom = new JSAtom(index);
+                _atomToString.Add(str);
+                _stringToAtom[str] = atom;
+                return atom;
+            }
+            finally
+            {
+                _lock.ExitWriteLock();
+            }
+        }
+        finally
+        {
+            _lock.ExitUpgradeableReadLock();
         }
     }
 
@@ -101,9 +145,14 @@ public sealed class AtomTable
             return false;
         }
 
-        lock (_lock)
+        _lock.EnterReadLock();
+        try
         {
             return _stringToAtom.TryGetValue(str, out atom);
+        }
+        finally
+        {
+            _lock.ExitReadLock();
         }
     }
 
@@ -113,9 +162,10 @@ public sealed class AtomTable
     /// <param name="atom">The atom to look up.</param>
     /// <returns>The string represented by the atom.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if the atom is invalid.</exception>
-    public string GetString(JSAtom atom)
+    public string GetString(in JSAtom atom)
     {
-        lock (_lock)
+        _lock.EnterReadLock();
+        try
         {
             uint index = atom.Value;
             if (index >= (uint)_atomToString.Count)
@@ -125,6 +175,10 @@ public sealed class AtomTable
 
             return _atomToString[(int)index];
         }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -133,9 +187,10 @@ public sealed class AtomTable
     /// <param name="atom">The atom to look up.</param>
     /// <param name="str">The string if found.</param>
     /// <returns><c>true</c> if the atom is valid; otherwise, <c>false</c>.</returns>
-    public bool TryGetString(JSAtom atom, out string? str)
+    public bool TryGetString(in JSAtom atom, out string? str)
     {
-        lock (_lock)
+        _lock.EnterReadLock();
+        try
         {
             uint index = atom.Value;
             if (index < (uint)_atomToString.Count)
@@ -146,6 +201,10 @@ public sealed class AtomTable
 
             str = null;
             return false;
+        }
+        finally
+        {
+            _lock.ExitReadLock();
         }
     }
 
@@ -344,6 +403,18 @@ public sealed class AtomTable
         GetOrCreateAtom("Symbol.toPrimitive");
         GetOrCreateAtom("Symbol.hasInstance");
         GetOrCreateAtom("Symbol.species");
+    }
+
+    #endregion
+
+    #region IDisposable
+
+    /// <summary>
+    /// Releases all resources used by the atom table.
+    /// </summary>
+    public void Dispose()
+    {
+        _lock.Dispose();
     }
 
     #endregion

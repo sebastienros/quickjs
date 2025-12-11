@@ -2,7 +2,8 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
-using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading;
 
 namespace QuickJS
 {
@@ -13,10 +14,9 @@ namespace QuickJS
     public sealed class JSSymbol
     {
         private static int _nextId = 0;
-        private static readonly object _lock = new object();
         
         // Global symbol registry for Symbol.for() and Symbol.keyFor()
-        private static readonly Dictionary<string, JSSymbol> _globalRegistry = new Dictionary<string, JSSymbol>();
+        private static readonly ConcurrentDictionary<string, JSSymbol> _globalRegistry = new();
 
         /// <summary>
         /// A unique identifier for this symbol (internal use).
@@ -39,10 +39,7 @@ namespace QuickJS
         /// <param name="description">Optional description for debugging purposes.</param>
         public JSSymbol(string? description = null)
         {
-            lock (_lock)
-            {
-                _id = _nextId++;
-            }
+            _id = Interlocked.Increment(ref _nextId);
             Description = description;
             IsGlobal = false;
         }
@@ -52,10 +49,7 @@ namespace QuickJS
         /// </summary>
         private JSSymbol(string description, bool isGlobal)
         {
-            lock (_lock)
-            {
-                _id = _nextId++;
-            }
+            _id = Interlocked.Increment(ref _nextId);
             Description = description;
             IsGlobal = isGlobal;
         }
@@ -68,16 +62,7 @@ namespace QuickJS
         /// <returns>The symbol associated with the key.</returns>
         public static JSSymbol For(string key)
         {
-            lock (_lock)
-            {
-                if (_globalRegistry.TryGetValue(key, out var existing))
-                {
-                    return existing;
-                }
-                var symbol = new JSSymbol(key, isGlobal: true);
-                _globalRegistry[key] = symbol;
-                return symbol;
-            }
+            return _globalRegistry.GetOrAdd(key, k => new JSSymbol(k, isGlobal: true));
         }
 
         /// <summary>

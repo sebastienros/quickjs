@@ -1,4 +1,14 @@
 <Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/QuickJS.Benchmarks/QuickJS.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path="AGENTS.MD" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+    <File Path="OVERVIEW.md" />
+    <File Path="README.md" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/QuickJS.Cli/QuickJS.Cli.csproj" />
     <Project Path="src/QuickJS.Core/QuickJS.Core.csproj" />

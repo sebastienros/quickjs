@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -33,13 +34,14 @@ public sealed class Lexer
 {
     private readonly string _source;
     private readonly string _fileName;
+    private readonly AtomTable? _atoms;
     private int _position;
     private int _line;
     private int _column;
     private bool _hasLineTerminatorBefore;
 
     // Keyword lookup table
-    private static readonly Dictionary<string, TokenType> Keywords = CreateKeywordTable();
+    private static readonly FrozenDictionary<string, TokenType> Keywords = CreateKeywordTable();
 
     /// <summary>
     /// Creates a new lexer for the specified source code.
@@ -47,13 +49,37 @@ public sealed class Lexer
     /// <param name="source">The JavaScript source code to tokenize.</param>
     /// <param name="fileName">The file name for error reporting (optional).</param>
     public Lexer(string source, string fileName = "<anonymous>")
+        : this(source, fileName, null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new lexer for the specified source code with an atom table for string interning.
+    /// </summary>
+    /// <param name="source">The JavaScript source code to tokenize.</param>
+    /// <param name="fileName">The file name for error reporting.</param>
+    /// <param name="atoms">The atom table for string interning (optional). When provided,
+    /// identifiers and keywords are interned to reduce string allocations.</param>
+    public Lexer(string source, string fileName, AtomTable? atoms)
     {
         _source = source ?? string.Empty;
         _fileName = fileName ?? "<anonymous>";
+        _atoms = atoms;
         _position = 0;
         _line = 1;
         _column = 1;
         _hasLineTerminatorBefore = false;
+    }
+
+    /// <summary>
+    /// Gets a potentially interned string from a span of the source.
+    /// If an atom table is provided, the string is interned; otherwise a new string is allocated.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private string GetString(int startPos, int length)
+    {
+        ReadOnlySpan<char> span = _source.AsSpan(startPos, length);
+        return _atoms?.GetOrCreateString(span) ?? span.ToString();
     }
 
     /// <summary>
@@ -412,7 +438,7 @@ public sealed class Lexer
             }
         }
 
-        string text = _source.Substring(startPos, _position - startPos);
+        string text = GetString(startPos, _position - startPos);
         var end = CreateLocation();
 
         // Check if it's a keyword
@@ -435,15 +461,15 @@ public sealed class Lexer
             Advance();
         }
 
-        string text = _source.Substring(startPos, _position - startPos);
+        string text = GetString(startPos, _position - startPos);
         var end = CreateLocation();
 
         return new Token(TokenType.PrivateName, text, start, end, text, _hasLineTerminatorBefore);
     }
 
-    private static Dictionary<string, TokenType> CreateKeywordTable()
+    private static FrozenDictionary<string, TokenType> CreateKeywordTable()
     {
-        return new Dictionary<string, TokenType>
+        var dict = new Dictionary<string, TokenType>
         {
             // Literal keywords
             ["null"] = TokenType.Null,
@@ -513,6 +539,7 @@ public sealed class Lexer
             ["protected"] = TokenType.Protected,
             ["public"] = TokenType.Public,
         };
+        return dict.ToFrozenDictionary();
     }
 
     #endregion
@@ -591,11 +618,12 @@ public sealed class Lexer
             Advance();
         }
 
-        string text = _source.Substring(startPos, _position - startPos);
+        string text = GetString(startPos, _position - startPos);
         var end = CreateLocation();
 
-        // Parse the numeric value
-        object? value = ParseNumericLiteral(text, isBigInt);
+        // Parse the numeric value using span to avoid allocations
+        ReadOnlySpan<char> numSpan = _source.AsSpan(startPos, _position - startPos);
+        object? value = ParseNumericLiteral(numSpan, isBigInt);
 
         return new Token(TokenType.Number, text, start, end, value, _hasLineTerminatorBefore);
     }
@@ -631,66 +659,178 @@ public sealed class Lexer
         }
     }
 
-    private static object? ParseNumericLiteral(string text, bool isBigInt)
+    private static object? ParseNumericLiteral(ReadOnlySpan<char> text, bool isBigInt)
     {
-        // Remove underscores and BigInt suffix
-        string cleanText = text.Replace("_", "");
-        if (isBigInt && cleanText.EndsWith("n", StringComparison.Ordinal))
-            cleanText = cleanText.Substring(0, cleanText.Length - 1);
+        if (text.IsEmpty)
+            return null;
+
+        // Remove BigInt suffix from consideration
+        if (isBigInt && text[text.Length - 1] == 'n')
+            text = text.Slice(0, text.Length - 1);
 
         try
         {
-            if (cleanText.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            // Check for hex/binary/octal prefixes
+            if (text.Length >= 2 && text[0] == '0')
             {
-                // Hexadecimal
-                long value = Convert.ToInt64(cleanText.Substring(2), 16);
-                if (isBigInt)
-                    return value;
-                return (double)value;
+                char prefix = char.ToLowerInvariant(text[1]);
+                if (prefix == 'x')
+                {
+                    // Hexadecimal
+                    long value = ParseIntegerSpan(text.Slice(2), 16);
+                    if (isBigInt)
+                        return value;
+                    return (double)value;
+                }
+                else if (prefix == 'b')
+                {
+                    // Binary
+                    long value = ParseIntegerSpan(text.Slice(2), 2);
+                    if (isBigInt)
+                        return value;
+                    return (double)value;
+                }
+                else if (prefix == 'o')
+                {
+                    // Octal
+                    long value = ParseIntegerSpan(text.Slice(2), 8);
+                    if (isBigInt)
+                        return value;
+                    return (double)value;
+                }
             }
-            else if (cleanText.StartsWith("0b", StringComparison.OrdinalIgnoreCase))
+
+            // Decimal (possibly floating point)
+            if (isBigInt)
             {
-                // Binary
-                long value = Convert.ToInt64(cleanText.Substring(2), 2);
-                if (isBigInt)
-                    return value;
-                return (double)value;
-            }
-            else if (cleanText.StartsWith("0o", StringComparison.OrdinalIgnoreCase))
-            {
-                // Octal
-                long value = Convert.ToInt64(cleanText.Substring(2), 8);
-                if (isBigInt)
-                    return value;
-                return (double)value;
+                // Parse as integer, skipping underscores
+                return ParseBigIntegerSpan(text);
             }
             else
             {
-                // Decimal (possibly floating point)
-                if (isBigInt)
-                {
-                    // Use BigInteger for large numbers
-                    if (System.Numerics.BigInteger.TryParse(cleanText, out var bigVal))
-                    {
-                        // If it fits in a long, return as long for efficiency
-                        if (bigVal >= long.MinValue && bigVal <= long.MaxValue)
-                            return (long)bigVal;
-                        // Return as BigInteger for very large numbers
-                        return bigVal;
-                    }
-                    return null;
-                }
-                else
-                {
-                    return double.Parse(cleanText, CultureInfo.InvariantCulture);
-                }
+                return ParseDoubleSpan(text);
             }
         }
         catch
         {
-            // Return the text for error reporting
             return null;
         }
+    }
+
+    /// <summary>
+    /// Parses an integer from a span, skipping underscores.
+    /// </summary>
+    private static long ParseIntegerSpan(ReadOnlySpan<char> span, int radix)
+    {
+        long result = 0;
+        foreach (char c in span)
+        {
+            if (c == '_')
+                continue;
+
+            int digit = radix switch
+            {
+                16 => HexValue(c),
+                2 => c - '0',
+                8 => c - '0',
+                10 => c - '0',
+                _ => c - '0'
+            };
+
+            result = result * radix + digit;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Parses a BigInteger from a span, skipping underscores.
+    /// </summary>
+    private static object ParseBigIntegerSpan(ReadOnlySpan<char> span)
+    {
+        // Count digits to determine if we need BigInteger
+        int digitCount = 0;
+        foreach (char c in span)
+        {
+            if (c != '_')
+                digitCount++;
+        }
+
+        // If small enough, parse as long
+        if (digitCount <= 18)
+        {
+            long result = 0;
+            foreach (char c in span)
+            {
+                if (c == '_')
+                    continue;
+                result = result * 10 + (c - '0');
+            }
+            return result;
+        }
+
+        // Large number - need BigInteger
+        // Build clean string for BigInteger.Parse
+        Span<char> clean = digitCount <= 128 ? stackalloc char[digitCount] : new char[digitCount];
+        int idx = 0;
+        foreach (char c in span)
+        {
+            if (c != '_')
+                clean[idx++] = c;
+        }
+
+#if NETSTANDARD2_0
+        return System.Numerics.BigInteger.Parse(clean.ToString());
+#else
+        return System.Numerics.BigInteger.Parse(clean);
+#endif
+    }
+
+    /// <summary>
+    /// Parses a double from a span, handling underscores and exponents.
+    /// </summary>
+    private static double ParseDoubleSpan(ReadOnlySpan<char> span)
+    {
+        // Check if we have underscores - if not, try direct parse
+        bool hasUnderscores = false;
+        foreach (char c in span)
+        {
+            if (c == '_')
+            {
+                hasUnderscores = true;
+                break;
+            }
+        }
+
+        if (!hasUnderscores)
+        {
+#if NETSTANDARD2_0
+            return double.Parse(span.ToString(), CultureInfo.InvariantCulture);
+#else
+            return double.Parse(span, CultureInfo.InvariantCulture);
+#endif
+        }
+
+        // Has underscores - need to build clean string
+        int cleanLen = 0;
+        foreach (char c in span)
+        {
+            if (c != '_')
+                cleanLen++;
+        }
+
+        Span<char> clean = cleanLen <= 64 ? stackalloc char[cleanLen] : new char[cleanLen];
+        int idx = 0;
+        foreach (char c in span)
+        {
+            if (c != '_')
+                clean[idx++] = c;
+        }
+
+#if NETSTANDARD2_0
+        return double.Parse(clean.ToString(), CultureInfo.InvariantCulture);
+#else
+        return double.Parse(clean, CultureInfo.InvariantCulture);
+#endif
     }
 
     #endregion
@@ -735,7 +875,7 @@ public sealed class Lexer
             }
         }
 
-        string text = _source.Substring(startPos, _position - startPos);
+        string text = GetString(startPos, _position - startPos);
         var end = CreateLocation();
 
         return new Token(TokenType.String, text, start, end, sb.ToString(), _hasLineTerminatorBefore);
@@ -866,7 +1006,7 @@ public sealed class Lexer
             }
         }
 
-        string text = _source.Substring(startPos, _position - startPos);
+        string text = GetString(startPos, _position - startPos);
         var end = CreateLocation();
 
         return new Token(TokenType.Template, text, start, end, sb.ToString(), _hasLineTerminatorBefore);
@@ -1085,7 +1225,7 @@ public sealed class Lexer
                 break;
         }
 
-        string text = _source.Substring(startPos, _position - startPos);
+        string text = GetString(startPos, _position - startPos);
         var end = CreateLocation();
 
         return new Token(type, text, start, end, null, _hasLineTerminatorBefore);
@@ -1240,18 +1380,15 @@ public sealed class Lexer
                         pos++;
                         while (pos < _source.Length && IsIdentifierPart(_source[pos]))
                             pos++;
-                        string ident = _source.Substring(start, pos - start);
+                        ReadOnlySpan<char> ident = _source.AsSpan(start, pos - start);
 
                         // Check for specific keywords we care about
-                        return ident switch
-                        {
-                            "function" => TokenType.Function,
-                            "in" => TokenType.In,
-                            "of" => TokenType.Of,
-                            "import" => TokenType.Import,
-                            "export" => TokenType.Export,
-                            _ => TokenType.Identifier
-                        };
+                        if (ident.SequenceEqual("function")) return TokenType.Function;
+                        if (ident.SequenceEqual("in")) return TokenType.In;
+                        if (ident.SequenceEqual("of")) return TokenType.Of;
+                        if (ident.SequenceEqual("import")) return TokenType.Import;
+                        if (ident.SequenceEqual("export")) return TokenType.Export;
+                        return TokenType.Identifier;
                     }
 
                     // Return the character as-is for other cases

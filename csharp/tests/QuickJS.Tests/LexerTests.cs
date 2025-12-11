@@ -270,25 +270,7 @@ public class LexerTests
     [Fact]
     public void Lexer_BinaryBigIntLiteral_Parsed()
     {
-        // Test the ParseNumericLiteral method directly
-        var parseMethod = typeof(Lexer).GetMethod("ParseNumericLiteral", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        
-        Assert.NotNull(parseMethod);
-        var parameters = parseMethod.GetParameters();
-        Assert.Equal(2, parameters.Length);
-        Assert.Equal("text", parameters[0].Name);
-        Assert.Equal("isBigInt", parameters[1].Name);
-        
-        // Call ParseNumericLiteral("0b1010", true) - without the 'n' since it's stripped before the call
-        var result1 = parseMethod!.Invoke(null, new object[] { "0b1010", true });
-        Assert.True(result1 is long, $"ParseNumericLiteral('0b1010', true) returned {result1?.GetType()?.Name ?? "null"} instead of long");
-        
-        // Call ParseNumericLiteral("0b1010n", true) - with the 'n'  
-        var result2 = parseMethod!.Invoke(null, new object[] { "0b1010n", true });
-        Assert.True(result2 is long, $"ParseNumericLiteral('0b1010n', true) returned {result2?.GetType()?.Name ?? "null"} instead of long");
-        
-        // Now test via lexer
+        // Test via lexer - binary BigInt literal
         var lexer = new Lexer("0b1010n");
         var token = lexer.NextToken();
         Assert.Equal(TokenType.Number, token.Type);

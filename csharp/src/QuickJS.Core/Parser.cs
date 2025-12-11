@@ -71,8 +71,8 @@ public sealed class Parser
     {
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _fileName = fileName ?? "<anonymous>";
-        _lexer = new Lexer(source, _fileName);
         _atoms = atoms ?? throw new ArgumentNullException(nameof(atoms));
+        _lexer = new Lexer(source, _fileName, _atoms);
         _currentToken = _lexer.NextToken();
         _currentFunction = new JSFunctionDef();
         _isModule = isModule;
