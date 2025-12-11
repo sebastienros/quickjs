@@ -93,17 +93,20 @@ public class InterpreterCallTests
 
         var obj = new JSObject();
         obj.Set("x", JSValue.FromInt32(99)); // sanity
+        obj.Set("getThis", JSValue.FromObject(methodFunc)); // Store method on object
+
+        // Get atom for "getThis"
+        var atom = _runtime.InternAtom("getThis");
 
         var caller = new JSFunctionDef();
-        int calleeConst = caller.Constants.Add(JSValue.FromObject(methodFunc));
         int objConst = caller.Constants.Add(JSValue.FromObject(obj));
-        // push this then callee
+        // Push object (this value)
         caller.ByteCode.EmitOp(OpCode.PushConst);
         caller.ByteCode.EmitU32((uint)objConst);
-        caller.ByteCode.EmitOp(OpCode.PushConst);
-        caller.ByteCode.EmitU32((uint)calleeConst);
+        // CallMethod with atom and argc
         caller.ByteCode.EmitOp(OpCode.CallMethod);
-        caller.ByteCode.EmitU16(0);
+        caller.ByteCode.EmitU32(atom.Value); // Atom for method name
+        caller.ByteCode.EmitU16(0); // argc
         caller.ByteCode.EmitOp(OpCode.Return);
 
         var result = _interpreter.Execute(caller);

@@ -489,7 +489,8 @@ public class ModuleLoaderTests
             // Handle relative paths
             if (moduleName.StartsWith("./"))
             {
-                var basePath = baseModule != null ? Path.GetDirectoryName(baseModule) : "/app";
+                // Use string manipulation instead of Path.GetDirectoryName to avoid platform-specific path separators
+                var basePath = baseModule != null ? baseModule.Substring(0, baseModule.LastIndexOf('/')) : "/app";
                 // Combine the base path with the relative module name (remove ./)
                 return basePath + "/" + moduleName.Substring(2);
             }
