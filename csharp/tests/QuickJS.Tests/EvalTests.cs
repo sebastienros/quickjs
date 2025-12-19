@@ -149,7 +149,7 @@ public class EvalTests
         Assert.True(_context.HasException);
     }
 
-    [Fact(Skip = "Function constructor behavior needs investigation")]
+    [Fact]
     public void FunctionConstructor_EmptyParamString_IsAllowed()
     {
         var FunctionCtor = (JSFunction)_context.GetGlobalProperty("Function").AsObject();
@@ -160,12 +160,8 @@ public class EvalTests
             JSValue.FromString("return 42")
         });
         
-        // If there's an exception, it's from the parsing, not param validation
-        // Empty params should be valid
-        if (!_context.HasException)
-        {
-            Assert.True(result.IsObject);
-        }
+        Assert.False(_context.HasException);
+        Assert.True(result.IsObject);
     }
 
     #endregion
@@ -360,12 +356,11 @@ public class EvalTests
         _context.ClearException();
     }
 
-    [Theory(Skip = "Function constructor behavior needs investigation")]
+    [Theory]
     [InlineData("123abc")]
     [InlineData("-name")]
     [InlineData("na me")]
     [InlineData("na.me")]
-    [InlineData("")]
     public void FunctionConstructor_InvalidIdentifier_ThrowsSyntaxError(string invalidName)
     {
         var FunctionCtor = (JSFunction)_context.GetGlobalProperty("Function").AsObject();

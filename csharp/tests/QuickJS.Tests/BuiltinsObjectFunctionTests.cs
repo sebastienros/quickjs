@@ -53,7 +53,7 @@ public class BuiltinsObjectFunctionTests
         Assert.True(resultFalse.IsBool && resultFalse.IsFalse);
     }
 
-    [Fact(Skip = "Function constructor behavior needs investigation - returns non-exception, non-object")]
+    [Fact]
     public void FunctionConstructor_CreatesDynamicFunction()
     {
         var funcCtor = (JSFunction)_context.GetGlobalProperty("Function").AsObject();

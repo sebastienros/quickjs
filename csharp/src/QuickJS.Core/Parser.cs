@@ -2897,6 +2897,20 @@ public sealed class Parser
         {
             ParseStatement();
         }
+
+        // Preserve the completion value of the last expression statement in script mode.
+        // This matches the behavior needed by eval() and the Function constructor, which
+        // both evaluate code from strings and return the last completion value.
+        //
+        // (Modules always evaluate to undefined, so do not preserve values in module mode.)
+        if (!_isModule && _currentFunction.ByteCode.Size > 0)
+        {
+            var bc = _currentFunction.ByteCode;
+            if (bc.GetU8(bc.Size - 1) == (byte)OpCode.Drop)
+            {
+                bc.Truncate(bc.Size - 1);
+            }
+        }
         
         // Resolve labels to convert label indices to relative offsets
         _currentFunction.ByteCode.ResolveLabels();

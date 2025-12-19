@@ -1,7 +1,6 @@
 // Licensed under the MIT License.
 
 using System;
-using System.Collections.Generic;
 
 namespace QuickJS;
 
@@ -98,6 +97,13 @@ public static class JSEval
                 return null;
 
             return parser.CurrentFunction;
+        }
+        catch (JSException ex)
+        {
+            diagnostics = new DiagnosticBag();
+            var loc = ex.Location.IsEmpty ? new SourceLocation(fileName, 1, 1) : ex.Location;
+            diagnostics.AddError("E0000", ex.Message, loc, fileName);
+            return null;
         }
         catch (Exception ex) when (ex is not JSException)
         {
@@ -261,50 +267,23 @@ public static class JSEval
         if (context == null)
             throw new ArgumentNullException(nameof(context));
 
-        // Build the function source
-        var paramList = new List<string>();
-        string body = "";
-
-        if (args.Length == 0)
+        // Build the function source similarly to QuickJS (quickjs.c: js_function_constructor).
+        // Concatenate parameter strings verbatim; let the parser validate syntax and
+        // produce SyntaxError for invalid parameter lists.
+        int n = args.Length - 1;
+        var functionSource = "(function anonymous(";
+        for (int i = 0; i < n; i++)
         {
-            // new Function() - empty function
-            body = "";
+            if (i != 0)
+                functionSource += ",";
+            functionSource += JSValueConversion.ToString(args[i]);
         }
-        else if (args.Length == 1)
+        functionSource += "\n) {\n";
+        if (n >= 0)
         {
-            // new Function(body) - no parameters
-            body = JSValueConversion.ToString(args[0]);
+            functionSource += JSValueConversion.ToString(args[n]);
         }
-        else
-        {
-            // new Function(p1, p2, ..., body)
-            // All but last argument are parameter names
-            for (int i = 0; i < args.Length - 1; i++)
-            {
-                var paramStr = JSValueConversion.ToString(args[i]);
-                // Parameters can be comma-separated in a single string
-                var parts = paramStr.Split(',');
-                foreach (var part in parts)
-                {
-                    var trimmed = part.Trim();
-                    if (!string.IsNullOrEmpty(trimmed))
-                    {
-                        // Validate parameter name (basic check)
-                        if (!IsValidIdentifier(trimmed))
-                        {
-                            context.ThrowError(JSErrorType.SyntaxError, $"Invalid parameter name: {trimmed}");
-                            return JSValue.Exception;
-                        }
-                        paramList.Add(trimmed);
-                    }
-                }
-            }
-            body = JSValueConversion.ToString(args[args.Length - 1]);
-        }
-
-        // Build the complete function source
-        var paramString = string.Join(", ", paramList);
-        var functionSource = $"(function anonymous({paramString}) {{\n{body}\n}})";
+        functionSource += "\n})";
 
         // Compile the function
         var functionDef = Compile(context.Runtime, functionSource, "anonymous", isModule: false, out var diagnostics);
