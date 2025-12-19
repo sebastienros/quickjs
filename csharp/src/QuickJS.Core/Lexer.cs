@@ -813,9 +813,12 @@ public sealed class Lexer
     private Token ScanString(SourceLocation start, char quote)
     {
         int startPos = _position;
-        var sb = new StringBuilder();
+        StringBuilder? sb = null;
         
         Advance(); // Opening quote
+
+        int valueStartPos = _position;
+        bool isClosed = false;
 
         while (!IsAtEnd)
         {
@@ -824,6 +827,7 @@ public sealed class Lexer
             if (c == quote)
             {
                 Advance(); // Closing quote
+                isClosed = true;
                 break;
             }
 
@@ -835,6 +839,18 @@ public sealed class Lexer
 
             if (c == '\\')
             {
+                if (sb is null)
+                {
+                    // Lazily allocate only when we encounter the first escape sequence.
+                    // Initialize with the already-scanned characters.
+                    int prefixLen = _position - valueStartPos;
+                    sb = new StringBuilder(capacity: Math.Max(16, prefixLen + 8));
+                    if (prefixLen > 0)
+                    {
+                        sb.Append(_source, valueStartPos, prefixLen);
+                    }
+                }
+
                 Advance(); // backslash
                 if (!IsAtEnd)
                 {
@@ -843,7 +859,10 @@ public sealed class Lexer
             }
             else
             {
-                sb.Append(c);
+                if (sb is not null)
+                {
+                    sb.Append(c);
+                }
                 Advance();
             }
         }
@@ -851,7 +870,12 @@ public sealed class Lexer
         var text = GetSlice(startPos, _position - startPos);
         var end = CreateLocation();
 
-        return new Token(TokenType.String, text, start, end, sb.ToString(), _hasLineTerminatorBefore);
+        int valueEndExclusive = isClosed ? _position - 1 : _position;
+        string value = sb is null
+            ? _source.Substring(valueStartPos, valueEndExclusive - valueStartPos)
+            : sb.ToString();
+
+        return new Token(TokenType.String, text, start, end, value, _hasLineTerminatorBefore);
     }
 
     private string ScanEscapeSequence()
