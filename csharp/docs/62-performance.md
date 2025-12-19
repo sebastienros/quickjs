@@ -296,18 +296,30 @@ public class InterpreterBenchmarks
 {
     private JSRuntime _runtime;
     private JSContext _context;
+    private JSFunctionDef _compiledArithmetic;
 
     [GlobalSetup]
     public void Setup()
     {
         _runtime = new JSRuntime();
         _context = _runtime.CreateContext();
+
+        // Compile once so the benchmark measures execution, not parsing.
+        _compiledArithmetic = JSEval.Compile(_runtime, "1 + 2 + 3 + 4 + 5", "<benchmark>")
+            ?? throw new InvalidOperationException("Compile failed");
     }
 
     [Benchmark]
-    public JSValue SimpleArithmetic()
+    public JSValue SimpleArithmetic_ExecuteOnly()
     {
-        return _context.Evaluate("1 + 2 + 3 + 4 + 5");
+        return _context.Execute(_compiledArithmetic);
+    }
+
+    [Benchmark]
+    public JSFunctionDef SimpleArithmetic_CompileOnly()
+    {
+        return JSEval.Compile(_runtime, "1 + 2 + 3 + 4 + 5", "<benchmark>")
+            ?? throw new InvalidOperationException("Compile failed");
     }
 
     [Benchmark]

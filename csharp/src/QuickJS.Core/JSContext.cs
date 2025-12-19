@@ -401,6 +401,21 @@ public sealed class JSContext : IDisposable
         return JSEval.Evaluate(this, source, fileName, JSEval.EvalFlags.Global | JSEval.EvalFlags.CompileOnly);
     }
 
+    /// <summary>
+    /// Executes previously compiled bytecode.
+    /// </summary>
+    /// <param name="functionDef">The compiled function definition to execute.</param>
+    /// <returns>The result of execution, or <see cref="JSValue.Exception"/> on error.</returns>
+    public JSValue Execute(JSFunctionDef functionDef)
+    {
+        ThrowIfDisposed();
+        if (functionDef == null)
+            throw new ArgumentNullException(nameof(functionDef));
+
+        var interpreter = GetInterpreter();
+        return interpreter.Execute(functionDef);
+    }
+
     #endregion
 
     #region Exception Handling

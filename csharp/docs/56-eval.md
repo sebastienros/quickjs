@@ -21,7 +21,7 @@ The `JSEval` static class provides the core functionality:
 public static class JSEval
 {
     // Compiles JavaScript source code
-    public static JSFunctionDef? Compile(JSContext context, string source, 
+    public static JSFunctionDef? Compile(JSRuntime runtime, string source, 
         string fileName = "<eval>", bool isModule = false);
     
     // Compiles and executes JavaScript code
@@ -68,7 +68,36 @@ public JSValue EvaluateModule(string source, string fileName = "<module>");
 
 // Compile without executing
 public JSValue Compile(string source, string fileName = "<script>");
+
+// Execute previously compiled bytecode
+public JSValue Execute(JSFunctionDef functionDef);
 ```
+
+## Reusing Compiled Scripts (Performance)
+
+`JSContext.Evaluate()` compiles the source string every time you call it (lexing + parsing + bytecode generation). For hot paths (benchmarks, tight loops, per-request code), compile once and execute the compiled result repeatedly:
+
+```csharp
+using var runtime = new JSRuntime();
+using var context = runtime.CreateContext();
+
+// Compile once
+var fn = JSEval.Compile(runtime, "1 + 2 * 3", "<benchmark>")
+    ?? throw new InvalidOperationException("Compile failed");
+
+// Execute many times (no per-call parse/compile)
+for (int i = 0; i < 1_000_000; i++)
+{
+    var value = context.Execute(fn);
+    if (value.IsException)
+        throw new Exception(context.GetAndClearException().ToString());
+}
+```
+
+### Reuse Rules
+
+- Safe to reuse a compiled `JSFunctionDef` across multiple `JSContext` instances created from the same `JSRuntime`.
+- Do not reuse a compiled `JSFunctionDef` across different `JSRuntime` instances: the compiled form depends on the runtime's atom table (interned strings), so atom IDs will not match.
 
 ## The eval() Function
 
@@ -174,24 +203,15 @@ The compilation process:
 3. **Execution**: The `Interpreter` executes the bytecode
 
 ```csharp
-public static JSFunctionDef? Compile(JSContext context, string source, 
-    string fileName = "<eval>", bool isModule = false)
+// Compile against the runtime (shared atom table)
+public static JSFunctionDef? Compile(JSRuntime runtime, string source,
+    string fileName = "<eval>", bool isModule = false, out DiagnosticBag diagnostics)
 {
-    var parser = new Parser(source, fileName, context.Runtime.AtomTable, isModule);
+    var parser = new Parser(source, fileName, runtime.AtomTable, isModule);
     parser.ParseProgram();
 
-    if (parser.Diagnostics.HasErrors)
-    {
-        // Report first error as SyntaxError
-        foreach (var firstError in parser.Diagnostics.GetErrors())
-        {
-            context.ThrowError(JSErrorType.SyntaxError, firstError.Message);
-            break;
-        }
-        return null;
-    }
-
-    return parser.CurrentFunction;
+    diagnostics = parser.Diagnostics;
+    return diagnostics.HasErrors ? null : parser.CurrentFunction;
 }
 ```
 

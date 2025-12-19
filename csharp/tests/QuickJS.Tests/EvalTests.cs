@@ -175,27 +175,27 @@ public class EvalTests
     [Fact]
     public void JSEval_Compile_ReturnsFunction()
     {
-        var fn = JSEval.Compile(_context, "1 + 2");
+        var fn = JSEval.Compile(_runtime, "1 + 2");
         Assert.NotNull(fn);
     }
 
     [Fact]
     public void JSEval_Compile_EmptySource_ReturnsFunction()
     {
-        var fn = JSEval.Compile(_context, "");
+        var fn = JSEval.Compile(_runtime, "");
         Assert.NotNull(fn);
     }
 
     [Fact]
     public void JSEval_Compile_NullSource_ThrowsArgumentNull()
     {
-        Assert.Throws<ArgumentNullException>(() => JSEval.Compile(_context, null!));
+        Assert.Throws<ArgumentNullException>(() => JSEval.Compile(_runtime, null!));
     }
 
     [Fact]
-    public void JSEval_Compile_NullContext_ThrowsArgumentNull()
+    public void JSEval_Compile_NullRuntime_ThrowsArgumentNull()
     {
-        Assert.Throws<ArgumentNullException>(() => JSEval.Compile(null!, "1 + 2"));
+        Assert.Throws<ArgumentNullException>(() => JSEval.Compile((JSRuntime)null!, "1 + 2"));
     }
 
     [Fact]

@@ -2,7 +2,6 @@
   "profiles": {
     "QuickJS.Benchmarks": {
       "commandName": "Project",
-      "commandLineArgs": "--filter \"*QuickJS_Loop\""
     }
   }
 }

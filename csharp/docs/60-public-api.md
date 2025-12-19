@@ -87,6 +87,26 @@ if (context.HasException)
 context.RunMicrotasks();
 ```
 
+### Performance: Compile Once, Execute Many
+
+`JSContext.Evaluate()` is convenient, but it compiles the source string on every call. If you're running the same script repeatedly, compile it once and execute the compiled result:
+
+```csharp
+using var runtime = new JSRuntime();
+using var context = runtime.CreateContext();
+
+var compiled = JSEval.Compile(runtime, "1 + 2 * 3", "<script>")
+    ?? throw new InvalidOperationException("Compile failed");
+
+// Repeated execution avoids lex/parse/compile allocations
+var result = context.Execute(compiled);
+```
+
+Reuse constraints:
+
+- You can execute the same compiled `JSFunctionDef` in any `JSContext` created from the same `JSRuntime`.
+- Do not reuse compiled output across different `JSRuntime` instances.
+
 ### JSValue
 
 `JSValue` is an immutable struct representing any JavaScript value:

@@ -72,15 +72,7 @@ public sealed partial class AtomTable
     /// <returns><c>true</c> if the string has an atom; otherwise, <c>false</c>.</returns>
     public bool TryGetAtom(ReadOnlySpan<char> span, out JSAtom atom)
     {
-        _lock.EnterReadLock();
-        try
-        {
-            return _spanLookup.TryGetValue(span, out atom);
-        }
-        finally
-        {
-            _lock.ExitReadLock();
-        }
+        return _spanLookup.TryGetValue(span, out atom);
     }
 
     /// <summary>

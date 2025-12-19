@@ -70,45 +70,87 @@ public static class JSEval
     /// <summary>
     /// Compiles JavaScript source code into a function definition.
     /// </summary>
-    /// <param name="context">The JavaScript context.</param>
+    /// <param name="runtime">The JavaScript runtime.</param>
     /// <param name="source">The JavaScript source code.</param>
     /// <param name="fileName">The file name for error reporting.</param>
     /// <param name="isModule">True if parsing as ES module, false for script mode.</param>
+    /// <param name="diagnostics">Parse diagnostics produced during compilation.</param>
     /// <returns>The compiled function definition, or null if compilation fails.</returns>
     /// <remarks>
     /// The returned function definition represents the top-level script or module.
     /// It can be executed using an interpreter.
     /// </remarks>
-    public static JSFunctionDef? Compile(JSContext context, string source, string fileName = "<eval>", bool isModule = false)
+    public static JSFunctionDef? Compile(JSRuntime runtime, string source, string fileName, bool isModule, out DiagnosticBag diagnostics)
     {
-        if (context == null)
-            throw new ArgumentNullException(nameof(context));
+        if (runtime == null)
+            throw new ArgumentNullException(nameof(runtime));
         if (source == null)
             throw new ArgumentNullException(nameof(source));
 
         try
         {
-            var parser = new Parser(source, fileName, context.Runtime.AtomTable, isModule);
+            var parser = new Parser(source, fileName, runtime.AtomTable, isModule);
             parser.ParseProgram();
 
-            if (parser.Diagnostics.HasErrors)
-            {
-                // Throw first error as syntax error
-                foreach (var firstError in parser.Diagnostics.GetErrors())
-                {
-                    context.ThrowError(JSErrorType.SyntaxError, firstError.Message);
-                    break;
-                }
+            diagnostics = parser.Diagnostics;
+
+            if (diagnostics.HasErrors)
                 return null;
-            }
 
             return parser.CurrentFunction;
         }
         catch (Exception ex) when (ex is not JSException)
         {
-            context.ThrowError(JSErrorType.SyntaxError, ex.Message);
+            diagnostics = new DiagnosticBag();
+            diagnostics.AddError("E0000", ex.Message, new SourceLocation(fileName, 1, 1), fileName);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Compiles JavaScript source code into a function definition.
+    /// </summary>
+    public static JSFunctionDef? Compile(JSRuntime runtime, string source, string fileName = "<eval>", bool isModule = false)
+    {
+        return Compile(runtime, source, fileName, isModule, out _);
+    }
+
+    /// <summary>
+    /// Compiles JavaScript source code into a function definition.
+    /// </summary>
+    /// <remarks>
+    /// This overload exists for backward compatibility. Prefer compiling against a <see cref="JSRuntime"/>
+    /// (and using a <see cref="JSContext"/> only for execution).
+    /// </remarks>
+    [Obsolete("Compile should not depend on JSContext. Use JSEval.Compile(JSRuntime, ...) and execute with JSContext.Execute(...).")]
+    public static JSFunctionDef? Compile(JSContext context, string source, string fileName = "<eval>", bool isModule = false)
+    {
+        if (context == null)
+            throw new ArgumentNullException(nameof(context));
+
+        var fn = Compile(context.Runtime, source, fileName, isModule, out var diagnostics);
+        if (fn != null)
+            return fn;
+
+        ThrowSyntaxErrorFromDiagnostics(context, diagnostics);
+        return null;
+    }
+
+    private static void ThrowSyntaxErrorFromDiagnostics(JSContext context, DiagnosticBag diagnostics)
+    {
+        if (context == null)
+            throw new ArgumentNullException(nameof(context));
+
+        if (diagnostics != null)
+        {
+            foreach (var error in diagnostics.GetErrors())
+            {
+                context.ThrowError(JSErrorType.SyntaxError, error.Message);
+                return;
+            }
+        }
+
+        context.ThrowError(JSErrorType.SyntaxError, "Compilation failed");
     }
 
     /// <summary>
@@ -133,9 +175,12 @@ public static class JSEval
         bool isModule = (flags & EvalFlags.Module) != 0;
 
         // Compile the source
-        var functionDef = Compile(context, source, fileName, isModule);
+        var functionDef = Compile(context.Runtime, source, fileName, isModule, out var diagnostics);
         if (functionDef == null)
+        {
+            ThrowSyntaxErrorFromDiagnostics(context, diagnostics);
             return JSValue.Exception;
+        }
 
         // If compile-only flag is set, return the compiled function
         if ((flags & EvalFlags.CompileOnly) != 0)
@@ -144,9 +189,8 @@ public static class JSEval
             return JSValue.FromObject(func);
         }
 
-        // Execute the compiled code using the cached interpreter
-        var interpreter = context.GetInterpreter();
-        return interpreter.Execute(functionDef);
+        // Execute the compiled code
+        return context.Execute(functionDef);
     }
 
     #endregion
@@ -263,14 +307,16 @@ public static class JSEval
         var functionSource = $"(function anonymous({paramString}) {{\n{body}\n}})";
 
         // Compile the function
-        var functionDef = Compile(context, functionSource, "anonymous", isModule: false);
+        var functionDef = Compile(context.Runtime, functionSource, "anonymous", isModule: false, out var diagnostics);
         if (functionDef == null)
+        {
+            ThrowSyntaxErrorFromDiagnostics(context, diagnostics);
             return JSValue.Exception;
+        }
 
         // The compiled function def is the top-level script
         // We need to execute it to get the function value
-        var interpreter = context.GetInterpreter();
-        var result = interpreter.Execute(functionDef);
+        var result = context.Execute(functionDef);
 
         if (context.HasException)
             return JSValue.Exception;
