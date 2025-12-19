@@ -141,6 +141,11 @@ public sealed class Interpreter
         var calleeObj = calleeVal.AsObject();
         if (calleeObj is JSFunction func)
         {
+            if (!isConstructor)
+            {
+                thisVal = NormalizeThisForCall(func, thisVal);
+            }
+
             // Native functions
             if (func.NativeFunction != null || func.NativeFunctionMagic != null)
             {
@@ -199,6 +204,38 @@ public sealed class Interpreter
 
         _context.ThrowTypeError("Not a function");
         return JSValue.Exception;
+    }
+
+    private JSValue NormalizeThisForCall(JSFunction func, JSValue thisVal)
+    {
+        if (func.IsStrict)
+            return thisVal;
+
+        // Non-strict calls: undefined/null -> global object
+        if (thisVal.IsUndefined || thisVal.IsNull)
+            return JSValue.FromObject(_context.GlobalObject);
+
+        if (thisVal.IsObject)
+            return thisVal;
+
+        // Box primitives (minimal ToObject behavior for this binding).
+        if (thisVal.IsString)
+        {
+            var stringProto = _context.GetClassPrototype(JSClassId.String) ?? _context.GetClassPrototype(JSClassId.Object);
+            return JSValue.FromObject(new JSObject(stringProto, JSClassId.String) { InternalValue = thisVal });
+        }
+        if (thisVal.IsNumber)
+        {
+            var numberProto = _context.GetClassPrototype(JSClassId.Number) ?? _context.GetClassPrototype(JSClassId.Object);
+            return JSValue.FromObject(new JSObject(numberProto, JSClassId.Number) { InternalValue = thisVal });
+        }
+        if (thisVal.IsBool)
+        {
+            var boolProto = _context.GetClassPrototype(JSClassId.Boolean) ?? _context.GetClassPrototype(JSClassId.Object);
+            return JSValue.FromObject(new JSObject(boolProto, JSClassId.Boolean) { InternalValue = thisVal });
+        }
+
+        return JSValue.FromObject(_context.GlobalObject);
     }
 
     /// <summary>
@@ -3332,6 +3369,14 @@ public sealed class Interpreter
                         {
                             // Append nothing
                         }
+                        else if (objVal.IsString)
+                        {
+                            var s = objVal.ToString() ?? string.Empty;
+                            for (int i = 0; i < s.Length; i++)
+                            {
+                                arrayObj.Set(index++, JSValue.FromString(s[i].ToString()));
+                            }
+                        }
                         else if (objVal.IsObject)
                         {
                             var obj = objVal.AsObject()!;
@@ -3343,15 +3388,23 @@ public sealed class Interpreter
                                     arrayObj.Set(index++, obj.Get(i));
                                 }
                             }
+                            else if (obj.HasProperty("length"))
+                            {
+                                uint len = JSValueConversion.ToUInt32(obj.Get("length"));
+                                for (uint i = 0; i < len; i++)
+                                {
+                                    arrayObj.Set(index++, obj.Get(i));
+                                }
+                            }
                             else
                             {
-                                _context.ThrowTypeError("Spread value must be an array (iterables not yet supported)");
+                                _context.ThrowTypeError("Spread value must be an array, string, or array-like object");
                                 return JSValue.Exception;
                             }
                         }
                         else
                         {
-                            _context.ThrowTypeError("Spread value must be an array (iterables not yet supported)");
+                            _context.ThrowTypeError("Spread value must be an array, string, or array-like object");
                             return JSValue.Exception;
                         }
 

@@ -116,6 +116,61 @@ public class InterpreterCallTests
     }
 
     [Fact]
+    public void Call0_NonStrict_ThisBindsToGlobalObject()
+    {
+        // Callee: return this === <globalObject>;
+        var callee = new JSFunctionDef();
+        callee.ByteCode.EmitOp(OpCode.PushThis);
+        callee.ByteCode.EmitOp(OpCode.PushConst);
+        callee.ByteCode.EmitU32((uint)0);
+        callee.ByteCode.EmitOp(OpCode.StrictEq);
+        callee.ByteCode.EmitOp(OpCode.Return);
+
+        var calleeFunc = new JSFunction(callee);
+
+        var caller = new JSFunctionDef();
+        int calleeIdx = caller.Constants.Add(JSValue.FromObject(calleeFunc));
+
+        // Patch callee's constant pool to point to caller's global const at index 0
+        // (callee has its own constant pool; simplest is to add the global const there too)
+        callee.Constants.Add(JSValue.FromObject(_context.GlobalObject));
+
+        caller.ByteCode.EmitOp(OpCode.PushConst);
+        caller.ByteCode.EmitU32((uint)calleeIdx);
+        caller.ByteCode.EmitOp(OpCode.Call0);
+        caller.ByteCode.EmitOp(OpCode.Return);
+
+        var result = _interpreter.Execute(caller);
+        Assert.False(_context.HasException);
+        Assert.True(result.IsBool);
+        Assert.True(result.IsTrue);
+    }
+
+    [Fact]
+    public void Call0_Strict_ThisIsUndefined()
+    {
+        // Callee: "use strict"; return this === undefined;
+        var callee = new JSFunctionDef { IsStrict = true };
+        callee.ByteCode.EmitOp(OpCode.PushThis);
+        callee.ByteCode.EmitOp(OpCode.Undefined);
+        callee.ByteCode.EmitOp(OpCode.StrictEq);
+        callee.ByteCode.EmitOp(OpCode.Return);
+        var calleeFunc = new JSFunction(callee);
+
+        var caller = new JSFunctionDef();
+        int calleeIdx = caller.Constants.Add(JSValue.FromObject(calleeFunc));
+        caller.ByteCode.EmitOp(OpCode.PushConst);
+        caller.ByteCode.EmitU32((uint)calleeIdx);
+        caller.ByteCode.EmitOp(OpCode.Call0);
+        caller.ByteCode.EmitOp(OpCode.Return);
+
+        var result = _interpreter.Execute(caller);
+        Assert.False(_context.HasException);
+        Assert.True(result.IsBool);
+        Assert.True(result.IsTrue);
+    }
+
+    [Fact]
     public void MappedArguments_AliasFunctionArgs()
     {
         // function f(a) { const args = arguments; args[0] = 20; return a; }

@@ -115,6 +115,54 @@ public class EvalTests
         Assert.Equal(3, r2.ToInt32());
     }
 
+    [Fact]
+    public void SpreadArguments_String_Works()
+    {
+        var result = _context.Evaluate(@"
+            function g(a, b, c) { return a + b + c; }
+            g(...'abc');
+        ");
+        Assert.False(_context.HasException, _context.HasException ? GetExceptionMessage() : "");
+        Assert.True(result.IsString);
+        Assert.Equal("abc", result.ToString());
+
+        string GetExceptionMessage()
+        {
+            var exVal = _context.GetAndClearException();
+            if (exVal.IsObject)
+            {
+                var exObj = exVal.AsObject();
+                var msgVal = exObj.Get("message");
+                return msgVal.IsString ? msgVal.ToString()! : exVal.ToString()!;
+            }
+            return exVal.ToString()!;
+        }
+    }
+
+    [Fact]
+    public void SpreadArguments_Array_Works()
+    {
+        var result = _context.Evaluate(@"
+            function inner(a, b, c) { return a + b + c; }
+            inner(...[1, 2, 3]);
+        ");
+        Assert.False(_context.HasException, _context.HasException ? GetExceptionMessage() : "");
+        Assert.True(result.IsNumber);
+        Assert.Equal(6, result.ToInt32());
+
+        string GetExceptionMessage()
+        {
+            var exVal = _context.GetAndClearException();
+            if (exVal.IsObject)
+            {
+                var exObj = exVal.AsObject();
+                var msgVal = exObj.Get("message");
+                return msgVal.IsString ? msgVal.ToString()! : exVal.ToString()!;
+            }
+            return exVal.ToString()!;
+        }
+    }
+
     #endregion
 
     #region Function Constructor Tests
