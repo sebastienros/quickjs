@@ -1048,9 +1048,21 @@ public sealed class Parser
             {
                 if (Match(TokenType.LeftParen))
                 {
-                    int argCount = ParseArguments();
-                    EmitOp(OpCode.Call);
-                    EmitU16((ushort)argCount);
+                    int argCount = ParseArguments(out bool hasSpread);
+                    if (!hasSpread)
+                    {
+                        EmitOp(OpCode.Call);
+                        EmitU16((ushort)argCount);
+                    }
+                    else
+                    {
+                        // Stack: callee, argsArray
+                        // Apply expects: callee, this, argsArray
+                        EmitOp(OpCode.Undefined);
+                        EmitOp(OpCode.Swap);
+                        EmitOp(OpCode.Apply);
+                        EmitU16(0);
+                    }
                     continue;
                 }
             }
@@ -1070,10 +1082,27 @@ public sealed class Parser
                 if ((flags & ParseFlags.PostfixCall) != 0 && Check(TokenType.LeftParen))
                 {
                     NextToken(); // consume '('
-                    int argCount = ParseArguments();
-                    EmitOp(OpCode.CallMethod);
-                    EmitAtom(atom);
-                    EmitU16((ushort)argCount);
+                    int argCount = ParseArguments(out bool hasSpread);
+                    if (!hasSpread)
+                    {
+                        EmitOp(OpCode.CallMethod);
+                        EmitAtom(atom);
+                        EmitU16((ushort)argCount);
+                    }
+                    else
+                    {
+                        // Preserve existing call order (args evaluated before property lookup)
+                        // to match the current (CallMethod-based) behavior.
+                        // Stack: obj, argsArray
+                        EmitOp(OpCode.Swap);      // argsArray, obj
+                        EmitOp(OpCode.Dup);       // argsArray, obj, obj
+                        EmitOp(OpCode.GetField);
+                        EmitAtom(atom);           // argsArray, obj, callee
+                        EmitOp(OpCode.Swap);      // argsArray, callee, obj
+                        EmitOp(OpCode.Rot3L);     // callee, obj, argsArray
+                        EmitOp(OpCode.Apply);
+                        EmitU16(0);
+                    }
                 }
                 else
                 {
@@ -1098,21 +1127,68 @@ public sealed class Parser
     /// <summary>
     /// Parses function call arguments.
     /// </summary>
-    private int ParseArguments()
+    private int ParseArguments(out bool hasSpread)
     {
         int count = 0;
+        hasSpread = false;
 
         if (!Check(TokenType.RightParen))
         {
             do
             {
-                ParseAssignExpression();
-                count++;
+                if (Check(TokenType.Comma))
+                {
+                    throw ReportError(
+                        ParseErrorCode.ExpectedExpression,
+                        ParserErrorMessages.ExpectedExpression(_currentToken.Type));
+                }
+
+                if (!hasSpread)
+                {
+                    if (Match(TokenType.Ellipsis))
+                    {
+                        // Convert already-pushed args into an array and start appending.
+                        EmitOp(OpCode.ArrayFrom);
+                        EmitU16((ushort)count);
+                        EmitOp(OpCode.PushI32);
+                        EmitI32(count);
+
+                        ParseAssignExpression();
+                        EmitOp(OpCode.Append);
+                        hasSpread = true;
+                    }
+                    else
+                    {
+                        ParseAssignExpression();
+                        count++;
+                    }
+                }
+                else
+                {
+                    if (Match(TokenType.Ellipsis))
+                    {
+                        ParseAssignExpression();
+                        EmitOp(OpCode.Append);
+                    }
+                    else
+                    {
+                        ParseAssignExpression();
+                        EmitOp(OpCode.DefineArrayEl);
+                    }
+                }
             }
             while (Match(TokenType.Comma));
         }
 
         Expect(TokenType.RightParen);
+
+        if (hasSpread)
+        {
+            // Stack: argsArray, nextIndex
+            // Leave just argsArray.
+            EmitOp(OpCode.Drop);
+            return 0;
+        }
         return count;
     }
 

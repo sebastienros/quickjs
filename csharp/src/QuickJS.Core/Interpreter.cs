@@ -3237,6 +3237,189 @@ public sealed class Interpreter
                     }
                     break;
 
+                case OpCode.ArrayFrom:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        ushort count = (ushort)(bytecode[pc] | (bytecode[pc + 1] << 8));
+                        pc += 2;
+
+                        if (_stackPointer < count)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow during array_from");
+                            return JSValue.Exception;
+                        }
+
+                        var arrayProto = _context.GetClassPrototype(JSClassId.Array);
+                        var arrObj = new JSObject(arrayProto, JSClassId.Array);
+
+                        // Values are on the stack in evaluation order; pop in reverse.
+                        for (int i = count - 1; i >= 0; i--)
+                        {
+                            var v = Pop();
+                            arrObj.Set((uint)i, v);
+                        }
+
+                        Push(JSValue.FromObject(arrObj));
+                    }
+                    break;
+
+                case OpCode.DefineArrayEl:
+                    {
+                        // Stack: array, index, value -> array, nextIndex
+                        if (_stackPointer < 3)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow during define_array_el");
+                            return JSValue.Exception;
+                        }
+
+                        var value = Pop();
+                        var indexVal = Pop();
+                        var arrayVal = Pop();
+
+                        if (!arrayVal.IsObject)
+                        {
+                            _context.ThrowTypeError("DefineArrayEl requires an array object");
+                            return JSValue.Exception;
+                        }
+                        var arrayObj = arrayVal.AsObject()!;
+                        if (arrayObj.ClassId != JSClassId.Array)
+                        {
+                            _context.ThrowTypeError("DefineArrayEl requires an array object");
+                            return JSValue.Exception;
+                        }
+
+                        uint index = JSValueConversion.ToUInt32(indexVal);
+                        arrayObj.Set(index, value);
+
+                        // Keep array and next index on stack.
+                        Push(arrayVal);
+                        PushI32((int)(index + 1));
+                    }
+                    break;
+
+                case OpCode.Append:
+                    {
+                        // Stack: array, index, obj -> array, nextIndex
+                        if (_stackPointer < 3)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow during append");
+                            return JSValue.Exception;
+                        }
+
+                        var objVal = Pop();
+                        var indexVal = Pop();
+                        var arrayVal = Pop();
+
+                        if (!arrayVal.IsObject)
+                        {
+                            _context.ThrowTypeError("Append requires an array object");
+                            return JSValue.Exception;
+                        }
+                        var arrayObj = arrayVal.AsObject()!;
+                        if (arrayObj.ClassId != JSClassId.Array)
+                        {
+                            _context.ThrowTypeError("Append requires an array object");
+                            return JSValue.Exception;
+                        }
+
+                        uint index = JSValueConversion.ToUInt32(indexVal);
+
+                        if (objVal.IsNull || objVal.IsUndefined)
+                        {
+                            // Append nothing
+                        }
+                        else if (objVal.IsObject)
+                        {
+                            var obj = objVal.AsObject()!;
+                            if (obj.ClassId == JSClassId.Array)
+                            {
+                                uint len = obj.ArrayLength;
+                                for (uint i = 0; i < len; i++)
+                                {
+                                    arrayObj.Set(index++, obj.Get(i));
+                                }
+                            }
+                            else
+                            {
+                                _context.ThrowTypeError("Spread value must be an array (iterables not yet supported)");
+                                return JSValue.Exception;
+                            }
+                        }
+                        else
+                        {
+                            _context.ThrowTypeError("Spread value must be an array (iterables not yet supported)");
+                            return JSValue.Exception;
+                        }
+
+                        Push(arrayVal);
+                        PushI32((int)index);
+                    }
+                    break;
+
+                case OpCode.Apply:
+                case OpCode.ApplyEval:
+                    {
+                        if (pc + 2 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        // Currently unused; reserved for future flags.
+                        _ = (ushort)(bytecode[pc] | (bytecode[pc + 1] << 8));
+                        pc += 2;
+
+                        if (_stackPointer < 3)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow during apply");
+                            return JSValue.Exception;
+                        }
+
+                        var argsArrayVal = Pop();
+                        var thisVal = Pop();
+                        var callee = Pop();
+
+                        JSValue[] args;
+                        if (argsArrayVal.IsNull || argsArrayVal.IsUndefined)
+                        {
+                            args = Array.Empty<JSValue>();
+                        }
+                        else if (argsArrayVal.IsObject)
+                        {
+                            var argsObj = argsArrayVal.AsObject()!;
+                            uint len = argsObj.ClassId == JSClassId.Array
+                                ? argsObj.ArrayLength
+                                : JSValueConversion.ToUInt32(argsObj.Get("length"));
+
+                            if (len > int.MaxValue)
+                            {
+                                _context.ThrowRangeError("Too many arguments");
+                                return JSValue.Exception;
+                            }
+
+                            args = new JSValue[(int)len];
+                            for (uint i = 0; i < len; i++)
+                            {
+                                args[(int)i] = argsObj.Get(i);
+                            }
+                        }
+                        else
+                        {
+                            _context.ThrowTypeError("Apply requires an array-like object");
+                            return JSValue.Exception;
+                        }
+
+                        var result = CallFunction(callee, thisVal, args);
+                        if (result.IsException)
+                            return JSValue.Exception;
+
+                        Push(result);
+                    }
+                    break;
+
                 // Small fixed-arity calls: func arg0...argN
                 case OpCode.Call0:
                 case OpCode.Call1:

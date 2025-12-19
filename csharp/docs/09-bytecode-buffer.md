@@ -59,6 +59,9 @@ buffer.EmitJump(OpCode.IfFalse, endLabel);
 
 // Mark the label at this position
 buffer.MarkLabel(endLabel);
+
+// Later (during finalization), patch all forward references
+buffer.ResolveLabels();
 ```
 
 ### Source Position Tracking
@@ -98,11 +101,13 @@ int sourcePos = lineTable.GetSourcePosition(12); // Returns 10
 
 ## Compilation Phases
 
-In QuickJS, labels go through multiple phases:
+In QuickJS, labels can exist as temporary bytecode markers (`OP_label`) during compilation.
 
-1. **Phase 1 (Position)**: Initial bytecode generation with `OP_label` markers
-2. **Phase 2 (Position2)**: After optimization passes, labels may have moved
-3. **Phase 3 (Address)**: Final address resolution for output bytecode
+In the C# port, label markers are **not emitted as executable bytecode**. Instead:
+
+1. **Phase 1 (Position)**: `MarkLabel()` records the current bytecode offset in `LabelInfo.Position`.
+2. **Phase 2 (Position2)**: Reserved for future optimization passes; currently unused.
+3. **Phase 3 (Address)**: `ResolveLabels()` patches recorded relocations with final relative offsets.
 
 The `LabelInfo` class tracks all three positions:
 

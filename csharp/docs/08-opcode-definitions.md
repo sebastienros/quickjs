@@ -64,7 +64,7 @@ public enum OpCode : ushort
 | Properties | Object properties | `GetField`, `PutField`, `GetArrayEl` |
 | Calls | Function calls | `Call`, `CallMethod`, `CallConstructor` |
 | Short | Optimized common cases | `Push0`-`Push7`, `GetLoc0`-`GetLoc3` |
-| Temporary | Used during compilation | `Label`, `EnterScope`, `ScopeGetVar` |
+| Temporary | Used during compilation | `EnterScope`, `ScopeGetVar` *(the C# compiler tracks labels via `ByteCodeBuffer` metadata rather than emitting `Label`/`OP_label` markers)* |
 
 ## OpCodeInfo Struct
 
@@ -171,9 +171,9 @@ QuickJS uses temporary opcodes during compilation that are resolved in later pha
 
 | Phase | Description |
 |-------|-------------|
-| Phase 1 | Parse and emit temporary opcodes (`ScopeGetVar`, `Label`, etc.) |
+| Phase 1 | Parse and emit temporary opcodes (`ScopeGetVar`, `EnterScope`, etc.) and record label metadata in `ByteCodeBuffer` |
 | Phase 2 | Resolve variable scopes → convert to `GetLoc`, `GetVar`, etc. |
-| Phase 3 | Resolve labels → convert to absolute jump offsets |
+| Phase 3 | Resolve labels → patch jump offsets in the emitted bytecode |
 | Final | Only final opcodes remain in the bytecode |
 
 ### Value Range Overlap
@@ -192,7 +192,7 @@ Nop = 177,           // Last non-temporary opcode
 // Temporary opcodes (used during compilation only)
 EnterScope,          // = 178 (same range as short opcodes)
 LeaveScope,
-Label,
+Label,               // Reserved for QuickJS parity; labels are tracked via ByteCodeBuffer metadata in this port
 // ... more temporary opcodes
 
 // Short opcodes (in final bytecode, same range)

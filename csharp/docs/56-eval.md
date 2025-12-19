@@ -109,6 +109,17 @@ Per the ECMAScript specification:
 2. If the argument is not a string, returns the argument unchanged
 3. If the argument is a string, parses and executes it as JavaScript code
 
+#### Completion Values
+
+When evaluating a string of code, `Evaluate(...)` returns the **completion value** of the evaluated program (similar to QuickJS behavior).
+
+For example, the completion value of an `if` statement is the completion value of the executed branch:
+
+```csharp
+// Returns 2
+var result = context.Evaluate("if (1) 2; else 3;");
+```
+
 ```csharp
 JSValue EvalImpl(JSValue thisArg, JSValue[] args)
 {
@@ -132,6 +143,13 @@ JSValue EvalImpl(JSValue thisArg, JSValue[] args)
 - **Indirect eval**: Called indirectly (e.g., `(0, eval)(...)` or `window.eval(...)`), runs in global scope
 
 The current implementation uses indirect eval semantics.
+
+## Spread Arguments in Calls
+
+The parser supports argument spread (`...`) inside call expressions.
+
+- `f(...[1, 2])` is compiled by building an argument array at runtime and invoking the call via the `Apply` opcode.
+- Current limitation: spread only supports **arrays** (general iterables via `Symbol.iterator` are not implemented yet).
 
 ## The Function Constructor
 

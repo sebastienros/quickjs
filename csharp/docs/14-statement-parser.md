@@ -67,6 +67,9 @@ EmitLabel(labelEnd);
 
 Labels are resolved during bytecode finalization when actual offsets are known.
 
+> Note: In this C# port, `EmitLabel`/`MarkLabel` records the current bytecode offset for a label.
+> It does **not** emit a runtime "label" opcode into the executable bytecode stream.
+
 ### Break/Continue Context Stack
 
 Nested loops require tracking which loop a `break` or `continue` targets:

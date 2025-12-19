@@ -47,9 +47,9 @@ internal sealed class RelocEntry
 /// Labels go through multiple phases during compilation:
 /// </para>
 /// <list type="bullet">
-/// <item>Phase 1: Initial bytecode generation with OP_label markers.</item>
-/// <item>Phase 2: Optimization passes, labels may move.</item>
-/// <item>Phase 3: Final address resolution for output bytecode.</item>
+/// <item>Phase 1: `MarkLabel()` records the bytecode offset in <see cref="Position"/>.</item>
+/// <item>Phase 2: Reserved for future optimization passes (<see cref="Position2"/>).</item>
+/// <item>Phase 3: Final address resolution/patching (<see cref="Address"/>).</item>
 /// </list>
 /// <para>
 /// Based on LabelSlot from QuickJS.

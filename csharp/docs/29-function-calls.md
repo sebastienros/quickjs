@@ -33,19 +33,26 @@ For now, the compiler emits direct arg accesses (`GetArg`/`PutArg`). Creating th
 
 | Opcode              | Stack Effect                              | Description |
 |---------------------|-------------------------------------------|-------------|
-| `call len flags`    | callee this argN…arg0 → result            | Invoke function/method |
-| `tail_call len`     | callee this argN…arg0 → result            | Tail-call optimized invocation |
-| `call_constructor len` | ctor this argN…arg0 → result (object) | Constructor call (with `new.target`) |
+| `call argc`         | callee arg0…argN-1 → result               | Invoke function (`this` = `undefined`) |
+| `tail_call argc`    | callee arg0…argN-1 → result               | Tail-call form (currently executed like `call`) |
+| `call_method atom argc` | obj arg0…argN-1 → result              | Invoke method (`this` = `obj`, callee loaded from property `atom`) |
+| `tail_call_method atom argc` | obj arg0…argN-1 → result          | Tail-call form (currently executed like `call_method`) |
+| `call_constructor argc` | ctor newTarget arg0…argN-1 → result    | Constructor call (allocates `this`, passes `new.target`) |
+| `apply flags`       | callee this argsArray → result            | Invoke using an argument array (used for spreads) |
+| `apply_eval flags`  | callee this argsArray → result            | Eval-specific apply (currently behaves like `apply`) |
 | `return`            | value →                                   | Return value to caller |
 | `return_undef`      | —                                         | Return `undefined` |
 | `ret`               | value? →                                  | Internal helper used by try/catch |
 
-> QuickJS encodes call flags for `has_this`, `has_new_target`, `is_tail`, etc. Mirror this in the operand decoding struct for C#.
+> QuickJS encodes additional call flags (has_this, is_tail, etc.). In this C# port the common call shapes are represented by distinct opcodes (`call`, `call_method`, `call_constructor`, `apply`).
 
 ## Implementation Outline
 
-1. **Decode call operands**: `argCount` (small int) and `callFlags` (bitfield for `has_this`, `is_constructor`, etc.).
-2. **Pop call site values**: Pop arguments, `this`, and callee in reverse order; store in temporaries.
+1. **Decode operands**: `argc` for fixed-arity calls, or a reserved `flags` field for `apply`/`apply_eval`.
+2. **Collect call site values**:
+   - `call`/`tail_call`: pop `argc` args + callee
+   - `call_method`/`tail_call_method`: pop `argc` args + receiver object; load callee from property
+   - `apply`/`apply_eval`: pop `argsArray`, `this`, `callee` and expand into an argument list
 3. **Resolve call target**:
    - If callee is `JSFunction` (bytecode): create a new `CallFrame`, set `savedPC/SP`, `thisValue`, `args`, `newTarget`, then jump into callee’s bytecode by setting `pc = 0` and `code = callee.Bytecode`.
    - If callee is native: call the delegate (`JSCFunction`) with the runtime/context, `thisValue`, argument span, and `newTarget`; push the returned `JSValue` (or throw on exception).
@@ -62,19 +69,18 @@ For now, the compiler emits direct arg accesses (`GetArg`/`PutArg`). Creating th
 ```text
 ; evaluates f(1, 2)
 ... push callee f ...
-... push this (undefined or base object) ...
 Push1
 Push2
-call 2 flags=HasThis
+call argc=2
 ```
 
 ### Method Call (compiler side)
 
 ```text
-GetField2 "f"   ; stack: obj obj.f
-Swap             ; obj.f obj
-Push1, Push2
-call 2 flags=HasThis
+... push receiver obj ...
+Push1
+Push2
+call_method "f" argc=2
 ```
 
 ### Constructor Call
@@ -85,6 +91,15 @@ call 2 flags=HasThis
 Push arg0 ...
 call_constructor argc=1
 ```
+
+## Spread Arguments
+
+When a call expression contains `...` (argument spread), the compiler lowers it to:
+
+1. Build an argument array at runtime using `array_from`, `define_array_el`, and `append`.
+2. Call via `apply` (or `apply_eval` for eval-specific call sites).
+
+Current limitation: `append` supports spreading **arrays** only (general iterables via `Symbol.iterator` are not implemented yet).
 
 ## QuickJS References
 

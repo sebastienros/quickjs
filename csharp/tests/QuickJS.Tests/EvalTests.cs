@@ -208,6 +208,14 @@ public class EvalTests
         Assert.False(_context.HasException, _context.HasException ? GetExceptionMessage() : "");
         var f1 = (JSFunction)f1Val.AsObject();
 
+        var f2Val = funcCtor.CallNative(JSValue.Undefined, new[]
+        {
+            JSValue.FromString("eval"),
+            JSValue.FromString("eval(...[1, 2])")
+        });
+        Assert.False(_context.HasException, _context.HasException ? GetExceptionMessage() : "");
+        var f2 = (JSFunction)f2Val.AsObject();
+
         int callCount = 0;
         var g = new JSFunction((_, args) =>
         {
@@ -221,7 +229,10 @@ public class EvalTests
         interpreter.CallFunction(JSValue.FromObject(f1), JSValue.Undefined, new[] { JSValue.FromObject(g) });
         Assert.False(_context.HasException);
 
-        Assert.Equal(1, callCount);
+        interpreter.CallFunction(JSValue.FromObject(f2), JSValue.Undefined, new[] { JSValue.FromObject(g) });
+        Assert.False(_context.HasException);
+
+        Assert.Equal(2, callCount);
     }
 
     [Fact]
