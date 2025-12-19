@@ -180,6 +180,10 @@ internal static class ParserErrorMessages
         if (string.IsNullOrEmpty(source) || position < 0)
             return string.Empty;
 
+        // Clamp position to valid range so error reporting never throws.
+        if (position > source.Length)
+            position = source.Length;
+
         // Find line start and end
         int lineStart = position;
         while (lineStart > 0 && source[lineStart - 1] != '\n')

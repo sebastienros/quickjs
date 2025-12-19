@@ -12,6 +12,8 @@ public class EvalTests
     private readonly JSRuntime _runtime = new();
     private readonly JSContext _context;
 
+    private Interpreter CreateInterpreter() => new(_context);
+
     public EvalTests()
     {
         _context = _runtime.CreateContext();
@@ -85,6 +87,34 @@ public class EvalTests
         Assert.True(result.IsUndefined);
     }
 
+    [Fact]
+    public void GlobalEval_ReturnsCompletionValue_ForIfStatement()
+    {
+        // Ported from C test suite: tests/test_builtin.js (test_eval)
+        var evalFn = (JSFunction)_context.GetGlobalProperty("eval").AsObject();
+
+        string GetExceptionMessage()
+        {
+            var exVal = _context.GetAndClearException();
+            if (exVal.IsObject)
+            {
+                var exObj = exVal.AsObject();
+                var name = exObj.Get("name").ToString() ?? "Error";
+                var message = exObj.Get("message").ToString() ?? "";
+                return string.IsNullOrEmpty(message) ? name : $"{name}: {message}";
+            }
+            return exVal.ToString() ?? "";
+        }
+
+        var r1 = evalFn.CallNative(JSValue.Undefined, new[] { JSValue.FromString("if (1) 2; else 3;") });
+        Assert.False(_context.HasException, _context.HasException ? GetExceptionMessage() : "");
+        Assert.Equal(2, r1.ToInt32());
+
+        var r2 = evalFn.CallNative(JSValue.Undefined, new[] { JSValue.FromString("if (0) 2; else 3;") });
+        Assert.False(_context.HasException, _context.HasException ? GetExceptionMessage() : "");
+        Assert.Equal(3, r2.ToInt32());
+    }
+
     #endregion
 
     #region Function Constructor Tests
@@ -147,6 +177,60 @@ public class EvalTests
         });
         
         Assert.True(_context.HasException);
+    }
+
+    [Fact]
+    public void FunctionConstructor_EvalParameter_ShadowingDoesNotTriggerEvalSemantics()
+    {
+        // Ported from C test suite: tests/test_builtin.js (test_eval2)
+        var funcCtor = (JSFunction)_context.GetGlobalProperty("Function").AsObject();
+        var interpreter = CreateInterpreter();
+        var functionProto = _context.GetClassPrototype(JSClassId.CFunction);
+
+        string GetExceptionMessage()
+        {
+            var exVal = _context.GetAndClearException();
+            if (exVal.IsObject)
+            {
+                var exObj = exVal.AsObject();
+                var name = exObj.Get("name").ToString() ?? "Error";
+                var message = exObj.Get("message").ToString() ?? "";
+                return string.IsNullOrEmpty(message) ? name : $"{name}: {message}";
+            }
+            return exVal.ToString() ?? "";
+        }
+
+        var f1Val = funcCtor.CallNative(JSValue.Undefined, new[]
+        {
+            JSValue.FromString("eval"),
+            JSValue.FromString("eval(1, 2)")
+        });
+        Assert.False(_context.HasException, _context.HasException ? GetExceptionMessage() : "");
+        var f1 = (JSFunction)f1Val.AsObject();
+
+        int callCount = 0;
+        var g = new JSFunction((_, args) =>
+        {
+            Assert.True(args.Length >= 2);
+            Assert.Equal(1, args[0].ToInt32());
+            Assert.Equal(2, args[1].ToInt32());
+            callCount++;
+            return JSValue.Undefined;
+        }, "g", 2, functionProto);
+
+        interpreter.CallFunction(JSValue.FromObject(f1), JSValue.Undefined, new[] { JSValue.FromObject(g) });
+        Assert.False(_context.HasException);
+
+        Assert.Equal(1, callCount);
+    }
+
+    [Fact]
+    public void Parser_FunctionConstructorSource_DoesNotThrow()
+    {
+        // Mirrors the source shape produced by the Function constructor.
+        var src = "(function anonymous(eval\n) {\neval(1, 2)\n})";
+        var parser = new Parser(src, "<function_ctor>", _runtime.AtomTable, isModule: false);
+        parser.ParseProgram();
     }
 
     [Fact]

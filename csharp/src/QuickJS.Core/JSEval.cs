@@ -108,7 +108,7 @@ public static class JSEval
         catch (Exception ex) when (ex is not JSException)
         {
             diagnostics = new DiagnosticBag();
-            diagnostics.AddError("E0000", ex.Message, new SourceLocation(fileName, 1, 1), fileName);
+            diagnostics.AddError("E0000", $"{ex.GetType().Name}: {ex.Message}", new SourceLocation(fileName, 1, 1), fileName);
             return null;
         }
     }

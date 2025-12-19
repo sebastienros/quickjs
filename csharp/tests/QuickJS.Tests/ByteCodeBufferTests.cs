@@ -272,15 +272,17 @@ public class ByteCodeBufferTests
     }
 
     [Fact]
-    public void MarkLabel_EmitsLabelOpcode()
+    public void MarkLabel_DoesNotEmitBytes()
     {
         var buffer = new ByteCodeBuffer();
         int label = buffer.DefineLabel();
 
         buffer.MarkLabel(label);
 
-        Assert.Equal((byte)OpCode.Label, buffer.GetU8(0));
-        Assert.Equal(0u, buffer.GetU32(1)); // label index
+        Assert.Equal(0, buffer.Size);
+        var info = buffer.GetLabel(label);
+        Assert.True(info.IsMarked);
+        Assert.Equal(0, info.Position);
     }
 
     [Fact]

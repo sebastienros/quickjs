@@ -2893,22 +2893,24 @@ public sealed class Parser
     /// </summary>
     public void ParseProgram()
     {
-        while (!Check(TokenType.EOF))
+        if (_isModule)
         {
-            ParseStatement();
-        }
-
-        // Preserve the completion value of the last expression statement in script mode.
-        // This matches the behavior needed by eval() and the Function constructor, which
-        // both evaluate code from strings and return the last completion value.
-        //
-        // (Modules always evaluate to undefined, so do not preserve values in module mode.)
-        if (!_isModule && _currentFunction.ByteCode.Size > 0)
-        {
-            var bc = _currentFunction.ByteCode;
-            if (bc.GetU8(bc.Size - 1) == (byte)OpCode.Drop)
+            while (!Check(TokenType.EOF))
             {
-                bc.Truncate(bc.Size - 1);
+                ParseStatement(preserveCompletionValue: false);
+            }
+        }
+        else
+        {
+            // Track the completion value of the script (like QuickJS eval_ret).
+            // Ensure exactly one value is left on the stack when the program finishes.
+            EmitOp(OpCode.Undefined);
+            while (!Check(TokenType.EOF))
+            {
+                // Drop previous statement's completion value (initially undefined)
+                // before evaluating the next statement.
+                EmitOp(OpCode.Drop);
+                ParseStatement(preserveCompletionValue: true);
             }
         }
         
@@ -2921,38 +2923,49 @@ public sealed class Parser
     /// </summary>
     public void ParseStatement()
     {
+        ParseStatement(preserveCompletionValue: false);
+    }
+
+    private void ParseStatement(bool preserveCompletionValue)
+    {
         switch (_currentToken.Type)
         {
             case TokenType.LeftBrace:
-                ParseBlockStatement();
+                ParseBlockStatement(preserveCompletionValue);
                 break;
 
             case TokenType.Var:
                 ParseVarStatement();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Let:
                 ParseLetStatement();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Const:
                 ParseConstStatement();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.If:
-                ParseIfStatement();
+                ParseIfStatement(preserveCompletionValue);
                 break;
 
             case TokenType.While:
                 ParseWhileStatement();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Do:
                 ParseDoWhileStatement();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.For:
                 ParseForStatement();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Return:
@@ -2961,10 +2974,12 @@ public sealed class Parser
 
             case TokenType.Break:
                 ParseBreakStatement();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Continue:
                 ParseContinueStatement();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Throw:
@@ -2973,43 +2988,51 @@ public sealed class Parser
 
             case TokenType.Try:
                 ParseTryStatement();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Switch:
                 ParseSwitchStatement();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Semicolon:
                 // Empty statement
                 NextToken();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Function:
                 ParseFunctionDeclaration();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Async:
                 // async function declaration
                 ParseAsyncFunctionDeclaration();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Class:
                 // class declaration
                 ParseClassDeclaration();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Import:
                 // import declaration (module only)
                 ParseImportDeclaration();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             case TokenType.Export:
                 // export declaration (module only)
                 ParseExportDeclaration();
+                if (preserveCompletionValue) EmitOp(OpCode.Undefined);
                 break;
 
             default:
-                ParseExpressionStatement();
+                ParseExpressionStatement(preserveCompletionValue);
                 break;
         }
     }
@@ -3040,14 +3063,26 @@ public sealed class Parser
     /// <summary>
     /// Parses a block statement: { statements }
     /// </summary>
-    public void ParseBlockStatement()
+    public void ParseBlockStatement(bool preserveCompletionValue = false)
     {
         Expect(TokenType.LeftBrace);
         _currentFunction.PushScope();
 
-        while (!Check(TokenType.RightBrace) && !Check(TokenType.EOF))
+        if (preserveCompletionValue)
         {
-            ParseStatement();
+            EmitOp(OpCode.Undefined);
+            while (!Check(TokenType.RightBrace) && !Check(TokenType.EOF))
+            {
+                EmitOp(OpCode.Drop);
+                ParseStatement(preserveCompletionValue: true);
+            }
+        }
+        else
+        {
+            while (!Check(TokenType.RightBrace) && !Check(TokenType.EOF))
+            {
+                ParseStatement(preserveCompletionValue: false);
+            }
         }
 
         _currentFunction.PopScope();
@@ -3057,10 +3092,13 @@ public sealed class Parser
     /// <summary>
     /// Parses an expression statement: expr;
     /// </summary>
-    public void ParseExpressionStatement()
+    public void ParseExpressionStatement(bool preserveCompletionValue = false)
     {
         ParseExpression();
-        EmitOp(OpCode.Drop);  // Discard expression result
+        if (!preserveCompletionValue)
+        {
+            EmitOp(OpCode.Drop);  // Discard expression result
+        }
         ExpectSemicolon();
     }
 
@@ -3455,7 +3493,7 @@ public sealed class Parser
     /// <summary>
     /// Parses an if statement: if (expr) stmt [else stmt]
     /// </summary>
-    public void ParseIfStatement()
+    public void ParseIfStatement(bool preserveCompletionValue = false)
     {
         Expect(TokenType.If);
         Expect(TokenType.LeftParen);
@@ -3465,19 +3503,24 @@ public sealed class Parser
         int labelElse = NewLabel();
         EmitGoto(OpCode.IfFalse, labelElse);
 
-        ParseStatement();
+        ParseStatement(preserveCompletionValue);
 
         if (Match(TokenType.Else))
         {
             int labelEnd = NewLabel();
             EmitGoto(OpCode.Goto, labelEnd);
             EmitLabel(labelElse);
-            ParseStatement();
+            ParseStatement(preserveCompletionValue);
             EmitLabel(labelEnd);
         }
         else
         {
             EmitLabel(labelElse);
+            if (preserveCompletionValue)
+            {
+                // If the condition is false and there is no else, completion is undefined.
+                EmitOp(OpCode.Undefined);
+            }
         }
     }
 

@@ -260,13 +260,12 @@ public sealed class ByteCodeBuffer
     /// </summary>
     /// <param name="label">The label index to mark.</param>
     /// <remarks>
-    /// This emits OP_label followed by the label index.
+    /// Labels are non-executable markers used to resolve jumps.
+    /// No bytes are emitted into the bytecode stream.
     /// </remarks>
     public void MarkLabel(int label)
     {
         var labelInfo = GetLabel(label);
-        EmitOp(OpCode.Label);
-        EmitU32((uint)label);
         labelInfo.Position = _size;
     }
 
