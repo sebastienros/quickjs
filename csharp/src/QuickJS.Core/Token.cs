@@ -22,7 +22,7 @@ namespace QuickJS;
 /// </para>
 /// </remarks>
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
-public sealed class Token
+public readonly struct Token
 {
     /// <summary>
     /// Gets the type of this token.
@@ -32,7 +32,7 @@ public sealed class Token
     /// <summary>
     /// Gets the raw source text that produced this token.
     /// </summary>
-    public string Text { get; }
+    public SourceSlice Text { get; }
 
     /// <summary>
     /// Gets the start position of this token in the source.
@@ -75,14 +75,14 @@ public sealed class Token
     /// <param name="hasLineTerminatorBefore">Whether preceded by a line terminator.</param>
     public Token(
         TokenType type,
-        string text,
+        SourceSlice text,
         SourceLocation start,
         SourceLocation end,
         object? value = null,
         bool hasLineTerminatorBefore = false)
     {
         Type = type;
-        Text = text ?? string.Empty;
+        Text = text;
         Start = start;
         End = end;
         Value = value;
@@ -92,7 +92,7 @@ public sealed class Token
     /// <summary>
     /// Creates a token with start/end at the same location.
     /// </summary>
-    public Token(TokenType type, string text, SourceLocation location, object? value = null)
+    public Token(TokenType type, SourceSlice text, SourceLocation location, object? value = null)
         : this(type, text, location, location, value)
     {
     }
@@ -157,7 +157,7 @@ public sealed class Token
     private string DebuggerDisplay => Type switch
     {
         TokenType.EOF => "EOF",
-        TokenType.Identifier => $"Identifier: {Value}",
+        TokenType.Identifier => $"Identifier: {Text}",
         TokenType.Number => $"Number: {Value}",
         TokenType.String => $"String: \"{Value}\"",
         _ when IsKeyword => $"Keyword: {Text}",

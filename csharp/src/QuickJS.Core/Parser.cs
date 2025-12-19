@@ -72,7 +72,7 @@ public sealed class Parser
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _fileName = fileName ?? "<anonymous>";
         _atoms = atoms ?? throw new ArgumentNullException(nameof(atoms));
-        _lexer = new Lexer(source, _fileName, _atoms);
+        _lexer = new Lexer(source, _fileName);
         _currentToken = _lexer.NextToken();
         _currentFunction = new JSFunctionDef();
         _isModule = isModule;
@@ -185,7 +185,7 @@ public sealed class Parser
     private string GetPropertyName()
     {
         if (_currentToken.Type == TokenType.Identifier)
-            return (string)_currentToken.Value!;
+            return _currentToken.Text.ToString();
         if (_currentToken.Type == TokenType.String)
             return (string)_currentToken.Value!;
         if (_currentToken.Type == TokenType.Number)
@@ -1063,9 +1063,8 @@ public sealed class Parser
                         ParseErrorCode.ExpectedIdentifier,
                         ParserErrorMessages.ExpectedIdentifier(_currentToken.Type));
                 }
-                var name = (string)_currentToken.Value!;
+                var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 NextToken(); // consume the identifier
-                var atom = _atoms.GetOrCreateAtom(name);
 
                 // Check if this is a method call: obj.method()
                 if ((flags & ParseFlags.PostfixCall) != 0 && Check(TokenType.LeftParen))
@@ -1161,8 +1160,7 @@ public sealed class Parser
                 if (PeekToken(true) == TokenType.Arrow)
                 {
                     // It's an arrow function with single identifier param
-                    var paramName = (string)_currentToken.Value!;
-                    var paramAtom = _atoms.GetOrCreateAtom(paramName);
+                    var paramAtom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                     NextToken(); // consume identifier
                     ParseArrowFunctionDirect(JSFunctionKind.Normal, new List<JSAtom> { paramAtom });
                 }
@@ -1348,8 +1346,7 @@ public sealed class Parser
 
             if (Check(TokenType.Identifier))
             {
-                var paramName = (string)_currentToken.Value!;
-                var paramAtom = _atoms.GetOrCreateAtom(paramName);
+                var paramAtom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 NextToken();
 
                 int idx = _currentFunction.AddArg(paramAtom);
@@ -1505,8 +1502,7 @@ public sealed class Parser
             // Check for => after the identifier
             if (PeekToken(true) == TokenType.Arrow)
             {
-                var paramName = (string)_currentToken.Value!;
-                var paramAtom = _atoms.GetOrCreateAtom(paramName);
+                var paramAtom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 NextToken(); // consume identifier
                 ParseArrowFunctionDirect(JSFunctionKind.Async, new List<JSAtom> { paramAtom });
             }
@@ -1653,8 +1649,7 @@ public sealed class Parser
                     _currentToken.Start);
             }
 
-            var name = (string)_currentToken.Value!;
-            var atom = _atoms.GetOrCreateAtom(name);
+            var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
             NextToken();
 
             EmitOp(OpCode.GetSuper);
@@ -1718,8 +1713,7 @@ public sealed class Parser
         // Parse optional/required class name
         if (Check(TokenType.Identifier))
         {
-            var name = (string)_currentToken.Value!;
-            className = _atoms.GetOrCreateAtom(name);
+            className = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
             hasName = true;
             NextToken();
         }
@@ -1868,8 +1862,9 @@ public sealed class Parser
         // Check for get/set
         if (Check(TokenType.Identifier))
         {
-            var name = (string)_currentToken.Value!;
-            if (name == "get" || name == "set")
+            var nameSpan = _currentToken.Text.Span;
+            bool isGetOrSet = nameSpan.SequenceEqual("get") || nameSpan.SequenceEqual("set");
+            if (isGetOrSet)
             {
                 // Save position BEFORE consuming get/set so we can restore it properly
                 var savedToken = _currentToken;
@@ -1883,8 +1878,8 @@ public sealed class Parser
                     Check(TokenType.LeftBracket) ||
                     Check(TokenType.PrivateName))
                 {
-                    isGetter = name == "get";
-                    isSetter = name == "set";
+                    isGetter = nameSpan.SequenceEqual("get");
+                    isSetter = nameSpan.SequenceEqual("set");
                 }
                 else
                 {
@@ -1908,15 +1903,29 @@ public sealed class Parser
         {
             // Private field/method: #name
             isPrivate = true;
-            var name = (string)_currentToken.Value!;
-            methodName = _atoms.GetOrCreateAtom(name);
+            methodName = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
             NextToken();
         }
         else if (IsPropertyNameToken())
         {
             // Regular property name (identifier, string, number, or keyword)
-            var name = GetPropertyName();
-            methodName = _atoms.GetOrCreateAtom(name);
+            if (Check(TokenType.Identifier) || IsKeyword(_currentToken.Type))
+            {
+                methodName = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
+            }
+            else if (Check(TokenType.String))
+            {
+                methodName = _atoms.GetOrCreateAtom((string)_currentToken.Value!);
+            }
+            else if (Check(TokenType.Number))
+            {
+                methodName = _atoms.GetOrCreateAtom(_currentToken.Value!.ToString()!);
+            }
+            else
+            {
+                // Fallback for any future property-name token types
+                methodName = _atoms.GetOrCreateAtom(GetPropertyName());
+            }
             NextToken();
         }
         else
@@ -2139,8 +2148,7 @@ public sealed class Parser
         // Check for default import: import defaultExport from 'module'
         if (Check(TokenType.Identifier))
         {
-            var localName = (string)_currentToken.Value!;
-            var localAtom = _atoms.GetOrCreateAtom(localName);
+            var localAtom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
             var defaultAtom = _atoms.GetOrCreateAtom("default");
             NextToken();
 
@@ -2173,8 +2181,7 @@ public sealed class Parser
                     _currentToken.Start);
             }
 
-            var localName = (string)_currentToken.Value!;
-            var localAtom = _atoms.GetOrCreateAtom(localName);
+            var localAtom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
             var starAtom = _atoms.GetOrCreateAtom("*");
             NextToken();
 
@@ -2206,8 +2213,7 @@ public sealed class Parser
                 }
                 else if (Check(TokenType.Identifier) || IsKeyword(_currentToken.Type))
                 {
-                    var name = GetPropertyName();
-                    importName = _atoms.GetOrCreateAtom(name);
+                    importName = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                     NextToken();
                 }
                 else
@@ -2229,8 +2235,7 @@ public sealed class Parser
                             _currentToken.Start);
                     }
 
-                    var alias = (string)_currentToken.Value!;
-                    localName = _atoms.GetOrCreateAtom(alias);
+                    localName = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                     NextToken();
                 }
                 else
@@ -2392,8 +2397,7 @@ public sealed class Parser
                         _currentToken.Start);
                 }
 
-                var exportName = (string)_currentToken.Value!;
-                var exportAtom = _atoms.GetOrCreateAtom(exportName);
+                var exportAtom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 var starAtom = _atoms.GetOrCreateAtom("*");
                 NextToken();
 
@@ -2428,8 +2432,7 @@ public sealed class Parser
                 // Parse the local name
                 if (Check(TokenType.Identifier) || IsKeyword(_currentToken.Type))
                 {
-                    var name = GetPropertyName();
-                    localName = _atoms.GetOrCreateAtom(name);
+                    localName = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                     NextToken();
                 }
                 else
@@ -2452,8 +2455,7 @@ public sealed class Parser
                     }
                     else if (Check(TokenType.Identifier) || IsKeyword(_currentToken.Type))
                     {
-                        var alias = GetPropertyName();
-                        exportName = _atoms.GetOrCreateAtom(alias);
+                        exportName = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                         NextToken();
                     }
                     else
@@ -2504,7 +2506,7 @@ public sealed class Parser
     /// </summary>
     private bool CheckContextualKeyword(string keyword)
     {
-        return Check(TokenType.Identifier) && (string)_currentToken.Value! == keyword;
+        return Check(TokenType.Identifier) && _currentToken.Text.Span.SequenceEqual(keyword);
     }
 
     /// <summary>
@@ -2524,10 +2526,10 @@ public sealed class Parser
     private void EmitNumberLiteral()
     {
         var value = _currentToken.Value;
-        var text = _currentToken.Text;
+        var text = _currentToken.Text.Span;
 
         // Check if this is a BigInt literal (ends with 'n')
-        bool isBigInt = text.EndsWith("n", StringComparison.Ordinal);
+        bool isBigInt = text.Length > 0 && text[text.Length - 1] == 'n';
 
         if (isBigInt)
         {
@@ -2568,7 +2570,7 @@ public sealed class Parser
             else
             {
                 throw new JSSyntaxError(
-                    $"Invalid BigInt literal: {text}",
+                    $"Invalid BigInt literal: {text.ToString()}",
                     _currentToken.Start);
             }
         }
@@ -2625,8 +2627,7 @@ public sealed class Parser
 
     private void EmitIdentifier()
     {
-        var name = (string)_currentToken.Value!;
-        var atom = _atoms.GetOrCreateAtom(name);
+        var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
         
         // Track LHS info for potential assignment
         _lastLhsBytecodePos = _currentFunction.ByteCode.Size;
@@ -2741,7 +2742,12 @@ public sealed class Parser
             // Parse property name
             JSAtom propertyName;
             
-            if (Check(TokenType.Identifier) || Check(TokenType.String))
+            if (Check(TokenType.Identifier))
+            {
+                propertyName = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
+                NextToken();
+            }
+            else if (Check(TokenType.String))
             {
                 propertyName = _atoms.GetOrCreateAtom((string)_currentToken.Value!);
                 NextToken();
@@ -2785,6 +2791,7 @@ public sealed class Parser
         Expect(TokenType.RightBrace);
     }
 
+
     /// <summary>
     /// Parses a new expression: new Constructor() or new Constructor(args)
     /// In JavaScript, 'new' creates an instance of a constructor function.
@@ -2798,7 +2805,7 @@ public sealed class Parser
         if (Check(TokenType.Dot))
         {
             NextToken(); // consume '.'
-            if (Check(TokenType.Identifier) && (string)_currentToken.Value! == "target")
+            if (Check(TokenType.Identifier) && _currentToken.Text.Span.SequenceEqual("target"))
             {
                 NextToken(); // consume 'target'
                 EmitOp(OpCode.ScopeGetVar);
@@ -2857,8 +2864,7 @@ public sealed class Parser
                         $"Expected property name after '.', got {_currentToken.Type}",
                         _currentToken.Start);
                 }
-                var name = (string)_currentToken.Value!;
-                var atom = _atoms.GetOrCreateAtom(name);
+                var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 NextToken();
 
                 EmitOp(OpCode.GetField);
@@ -3125,8 +3131,7 @@ public sealed class Parser
             }
             else if (Check(TokenType.Identifier))
             {
-                var name = (string)_currentToken.Value!;
-                var atom = _atoms.GetOrCreateAtom(name);
+                var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 NextToken();
 
                 // For global var declarations (non-lexical in global scope), 
@@ -3249,8 +3254,7 @@ public sealed class Parser
 
                 if (Check(TokenType.Identifier))
                 {
-                    var name = (string)_currentToken.Value!;
-                    var atom = _atoms.GetOrCreateAtom(name);
+                    var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                     NextToken();
 
                     // Define the variable
@@ -3307,8 +3311,7 @@ public sealed class Parser
 
                 if (Check(TokenType.Identifier))
                 {
-                    var propName = (string)_currentToken.Value!;
-                    var propAtom = _atoms.GetOrCreateAtom(propName);
+                    var propAtom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                     NextToken();
 
                     JSAtom varAtom;
@@ -3340,8 +3343,7 @@ public sealed class Parser
                                 "Expected identifier after ':'",
                                 _currentToken.Start);
                         }
-                        var newName = (string)_currentToken.Value!;
-                        varAtom = _atoms.GetOrCreateAtom(newName);
+                        varAtom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                         NextToken();
                         bindingType = DestructuringBindingType.ObjectProperty;
                         _currentFunction.AddVar(varAtom, kind, isConst, isLexical);
@@ -3729,8 +3731,7 @@ public sealed class Parser
                         _currentToken.Start);
                 }
 
-                var name = (string)_currentToken.Value!;
-                var atom = _atoms.GetOrCreateAtom(name);
+                var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 NextToken();
                 Expect(TokenType.RightParen);
 
@@ -3928,8 +3929,7 @@ public sealed class Parser
             // Parse function name
             if (Check(TokenType.Identifier))
             {
-                var name = (string)_currentToken.Value!;
-                funcName = _atoms.GetOrCreateAtom(name);
+                funcName = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 NextToken();
             }
             else if (funcType == JSParseFunctionType.Statement)
@@ -3962,8 +3962,7 @@ public sealed class Parser
         if (funcType == JSParseFunctionType.Arrow && Check(TokenType.Identifier))
         {
             // Arrow function with single unparenthesized parameter: x => expr
-            var paramName = (string)_currentToken.Value!;
-            var paramAtom = _atoms.GetOrCreateAtom(paramName);
+            var paramAtom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
             _currentFunction.AddArg(paramAtom);
             _currentFunction.DefinedArgCount = 1;
             NextToken();
@@ -4166,8 +4165,7 @@ public sealed class Parser
             else if (Check(TokenType.Identifier))
             {
                 // Simple parameter
-                var paramName = (string)_currentToken.Value!;
-                var paramAtom = _atoms.GetOrCreateAtom(paramName);
+                var paramAtom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 NextToken();
 
                 int idx = _currentFunction.AddArg(paramAtom);
@@ -4303,8 +4301,7 @@ public sealed class Parser
 
             if (Check(TokenType.Identifier))
             {
-                var name = (string)_currentToken.Value!;
-                var atom = _atoms.GetOrCreateAtom(name);
+                var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 NextToken();
 
                 if (isRest)
@@ -4406,8 +4403,7 @@ public sealed class Parser
                         "Expected identifier after '...'",
                         _currentToken.Start);
                 }
-                var restName = (string)_currentToken.Value!;
-                var restAtom = _atoms.GetOrCreateAtom(restName);
+                var restAtom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 NextToken();
 
                 // Copy remaining enumerable properties
@@ -4451,8 +4447,7 @@ public sealed class Parser
 
             if (Check(TokenType.Identifier))
             {
-                var name = (string)_currentToken.Value!;
-                propName = _atoms.GetOrCreateAtom(name);
+                propName = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 varName = propName;
                 NextToken();
             }
@@ -4487,8 +4482,7 @@ public sealed class Parser
                 else if (Check(TokenType.Identifier))
                 {
                     // Renaming: { prop: newName }
-                    var newName = (string)_currentToken.Value!;
-                    varName = _atoms.GetOrCreateAtom(newName);
+                    varName = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                     NextToken();
                 }
                 else

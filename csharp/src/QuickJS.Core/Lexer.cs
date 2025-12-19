@@ -2,7 +2,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Collections.Frozen;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -34,14 +33,10 @@ public sealed class Lexer
 {
     private readonly string _source;
     private readonly string _fileName;
-    private readonly AtomTable? _atoms;
     private int _position;
     private int _line;
     private int _column;
     private bool _hasLineTerminatorBefore;
-
-    // Keyword lookup table
-    private static readonly FrozenDictionary<string, TokenType> Keywords = CreateKeywordTable();
 
     /// <summary>
     /// Creates a new lexer for the specified source code.
@@ -49,37 +44,89 @@ public sealed class Lexer
     /// <param name="source">The JavaScript source code to tokenize.</param>
     /// <param name="fileName">The file name for error reporting (optional).</param>
     public Lexer(string source, string fileName = "<anonymous>")
-        : this(source, fileName, null)
-    {
-    }
-
-    /// <summary>
-    /// Creates a new lexer for the specified source code with an atom table for string interning.
-    /// </summary>
-    /// <param name="source">The JavaScript source code to tokenize.</param>
-    /// <param name="fileName">The file name for error reporting.</param>
-    /// <param name="atoms">The atom table for string interning (optional). When provided,
-    /// identifiers and keywords are interned to reduce string allocations.</param>
-    public Lexer(string source, string fileName, AtomTable? atoms)
     {
         _source = source ?? string.Empty;
         _fileName = fileName ?? "<anonymous>";
-        _atoms = atoms;
         _position = 0;
         _line = 1;
         _column = 1;
         _hasLineTerminatorBefore = false;
     }
 
-    /// <summary>
-    /// Gets a potentially interned string from a span of the source.
-    /// If an atom table is provided, the string is interned; otherwise a new string is allocated.
-    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private string GetString(int startPos, int length)
+    private SourceSlice GetSlice(int startPos, int length)
     {
-        ReadOnlySpan<char> span = _source.AsSpan(startPos, length);
-        return _atoms?.GetOrCreateString(span) ?? span.ToString();
+        return new SourceSlice(_source, startPos, length);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryGetKeyword(ReadOnlySpan<char> span, out TokenType type)
+    {
+        // Allocation-free keyword detection.
+        // Use a switch expression and span patterns.
+        type = span.Length switch
+        {
+            2 when span is "do" => TokenType.Do,
+            2 when span is "if" => TokenType.If,
+            2 when span is "in" => TokenType.In,
+            2 when span is "of" => TokenType.Of,
+
+            3 when span is "for" => TokenType.For,
+            3 when span is "let" => TokenType.Let,
+            3 when span is "new" => TokenType.New,
+            3 when span is "try" => TokenType.Try,
+            3 when span is "var" => TokenType.Var,
+
+            4 when span is "case" => TokenType.Case,
+            4 when span is "else" => TokenType.Else,
+            4 when span is "enum" => TokenType.Enum,
+            4 when span is "null" => TokenType.Null,
+            4 when span is "this" => TokenType.This,
+            4 when span is "true" => TokenType.True,
+            4 when span is "void" => TokenType.Void,
+            4 when span is "with" => TokenType.With,
+
+            5 when span is "async" => TokenType.Async,
+            5 when span is "await" => TokenType.Await,
+            5 when span is "break" => TokenType.Break,
+            5 when span is "catch" => TokenType.Catch,
+            5 when span is "class" => TokenType.Class,
+            5 when span is "const" => TokenType.Const,
+            5 when span is "false" => TokenType.False,
+            5 when span is "super" => TokenType.Super,
+            5 when span is "throw" => TokenType.Throw,
+            5 when span is "while" => TokenType.While,
+            5 when span is "yield" => TokenType.Yield,
+
+            6 when span is "delete" => TokenType.Delete,
+            6 when span is "export" => TokenType.Export,
+            6 when span is "import" => TokenType.Import,
+            6 when span is "public" => TokenType.Public,
+            6 when span is "return" => TokenType.Return,
+            6 when span is "static" => TokenType.Static,
+            6 when span is "switch" => TokenType.Switch,
+            6 when span is "typeof" => TokenType.TypeOf,
+
+            7 when span is "default" => TokenType.Default,
+            7 when span is "extends" => TokenType.Extends,
+            7 when span is "finally" => TokenType.Finally,
+            7 when span is "package" => TokenType.Package,
+            7 when span is "private" => TokenType.Private,
+
+            8 when span is "continue" => TokenType.Continue,
+            8 when span is "debugger" => TokenType.Debugger,
+            8 when span is "function" => TokenType.Function,
+
+            9 when span is "interface" => TokenType.Interface,
+            9 when span is "protected" => TokenType.Protected,
+
+            10 when span is "implements" => TokenType.Implements,
+            10 when span is "instanceof" => TokenType.InstanceOf,
+
+            _ => default
+        };
+
+        return type != default;
     }
 
     /// <summary>
@@ -117,7 +164,7 @@ public sealed class Lexer
 
         if (IsAtEnd)
         {
-            return new Token(TokenType.EOF, "", start, start, null, _hasLineTerminatorBefore);
+            return new Token(TokenType.EOF, SourceSlice.Empty, start, start, null, _hasLineTerminatorBefore);
         }
 
         char c = Current;
@@ -438,17 +485,18 @@ public sealed class Lexer
             }
         }
 
-        string text = GetString(startPos, _position - startPos);
+        int length = _position - startPos;
+        var text = GetSlice(startPos, length);
         var end = CreateLocation();
 
         // Check if it's a keyword
-        if (Keywords.TryGetValue(text, out TokenType keywordType))
+        if (TryGetKeyword(text.Span, out TokenType keywordType))
         {
             return new Token(keywordType, text, start, end, null, _hasLineTerminatorBefore);
         }
 
         // It's an identifier
-        return new Token(TokenType.Identifier, text, start, end, text, _hasLineTerminatorBefore);
+        return new Token(TokenType.Identifier, text, start, end, null, _hasLineTerminatorBefore);
     }
 
     private Token ScanPrivateName(SourceLocation start)
@@ -461,85 +509,10 @@ public sealed class Lexer
             Advance();
         }
 
-        string text = GetString(startPos, _position - startPos);
+        var text = GetSlice(startPos, _position - startPos);
         var end = CreateLocation();
 
-        return new Token(TokenType.PrivateName, text, start, end, text, _hasLineTerminatorBefore);
-    }
-
-    private static FrozenDictionary<string, TokenType> CreateKeywordTable()
-    {
-        var dict = new Dictionary<string, TokenType>
-        {
-            // Literal keywords
-            ["null"] = TokenType.Null,
-            ["true"] = TokenType.True,
-            ["false"] = TokenType.False,
-
-            // Control flow
-            ["if"] = TokenType.If,
-            ["else"] = TokenType.Else,
-            ["do"] = TokenType.Do,
-            ["while"] = TokenType.While,
-            ["for"] = TokenType.For,
-            ["break"] = TokenType.Break,
-            ["continue"] = TokenType.Continue,
-            ["switch"] = TokenType.Switch,
-            ["case"] = TokenType.Case,
-            ["default"] = TokenType.Default,
-
-            // Functions
-            ["return"] = TokenType.Return,
-            ["function"] = TokenType.Function,
-            ["async"] = TokenType.Async,
-            ["yield"] = TokenType.Yield,
-            ["await"] = TokenType.Await,
-
-            // Exceptions
-            ["throw"] = TokenType.Throw,
-            ["try"] = TokenType.Try,
-            ["catch"] = TokenType.Catch,
-            ["finally"] = TokenType.Finally,
-
-            // Declarations
-            ["var"] = TokenType.Var,
-            ["let"] = TokenType.Let,
-            ["const"] = TokenType.Const,
-
-            // Classes
-            ["class"] = TokenType.Class,
-            ["extends"] = TokenType.Extends,
-            ["super"] = TokenType.Super,
-            ["static"] = TokenType.Static,
-
-            // Operators
-            ["this"] = TokenType.This,
-            ["new"] = TokenType.New,
-            ["delete"] = TokenType.Delete,
-            ["void"] = TokenType.Void,
-            ["typeof"] = TokenType.TypeOf,
-            ["in"] = TokenType.In,
-            ["of"] = TokenType.Of,
-            ["instanceof"] = TokenType.InstanceOf,
-
-            // Modules
-            ["import"] = TokenType.Import,
-            ["export"] = TokenType.Export,
-
-            // Other
-            ["debugger"] = TokenType.Debugger,
-            ["with"] = TokenType.With,
-
-            // Future reserved
-            ["enum"] = TokenType.Enum,
-            ["implements"] = TokenType.Implements,
-            ["interface"] = TokenType.Interface,
-            ["package"] = TokenType.Package,
-            ["private"] = TokenType.Private,
-            ["protected"] = TokenType.Protected,
-            ["public"] = TokenType.Public,
-        };
-        return dict.ToFrozenDictionary();
+        return new Token(TokenType.PrivateName, text, start, end, null, _hasLineTerminatorBefore);
     }
 
     #endregion
@@ -618,7 +591,7 @@ public sealed class Lexer
             Advance();
         }
 
-        string text = GetString(startPos, _position - startPos);
+        var text = GetSlice(startPos, _position - startPos);
         var end = CreateLocation();
 
         // Parse the numeric value using span to avoid allocations
@@ -875,7 +848,7 @@ public sealed class Lexer
             }
         }
 
-        string text = GetString(startPos, _position - startPos);
+        var text = GetSlice(startPos, _position - startPos);
         var end = CreateLocation();
 
         return new Token(TokenType.String, text, start, end, sb.ToString(), _hasLineTerminatorBefore);
@@ -1006,7 +979,7 @@ public sealed class Lexer
             }
         }
 
-        string text = GetString(startPos, _position - startPos);
+        var text = GetSlice(startPos, _position - startPos);
         var end = CreateLocation();
 
         return new Token(TokenType.Template, text, start, end, sb.ToString(), _hasLineTerminatorBefore);
@@ -1225,7 +1198,7 @@ public sealed class Lexer
                 break;
         }
 
-        string text = GetString(startPos, _position - startPos);
+        var text = GetSlice(startPos, _position - startPos);
         var end = CreateLocation();
 
         return new Token(type, text, start, end, null, _hasLineTerminatorBefore);

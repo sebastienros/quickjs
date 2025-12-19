@@ -144,10 +144,10 @@ public class TokenTests
     {
         var start = new SourceLocation("test.js", 1, 1);
         var end = new SourceLocation("test.js", 1, 5);
-        var token = new Token(TokenType.Identifier, "test", start, end, "test", true);
+        var token = new Token(TokenType.Identifier, new SourceSlice("test"), start, end, "test", true);
 
         Assert.Equal(TokenType.Identifier, token.Type);
-        Assert.Equal("test", token.Text);
+        Assert.Equal("test", token.Text.ToString());
         Assert.Equal(start, token.Start);
         Assert.Equal(end, token.End);
         Assert.Equal("test", token.Value);
@@ -158,7 +158,7 @@ public class TokenTests
     public void Token_SimpleConstructor_SameStartAndEnd()
     {
         var location = new SourceLocation("test.js", 1, 1);
-        var token = new Token(TokenType.Plus, "+", location);
+        var token = new Token(TokenType.Plus, new SourceSlice("+"), location);
 
         Assert.Equal(location, token.Start);
         Assert.Equal(location, token.End);
@@ -167,104 +167,104 @@ public class TokenTests
     [Fact]
     public void Token_IsEOF_TrueForEOFToken()
     {
-        var token = new Token(TokenType.EOF, "", SourceLocation.Empty);
+        var token = new Token(TokenType.EOF, new SourceSlice(""), SourceLocation.Empty);
         Assert.True(token.IsEOF);
     }
 
     [Fact]
     public void Token_IsError_TrueForErrorToken()
     {
-        var token = new Token(TokenType.Error, "?", SourceLocation.Empty);
+        var token = new Token(TokenType.Error, new SourceSlice("?"), SourceLocation.Empty);
         Assert.True(token.IsError);
     }
 
     [Fact]
     public void Token_IsKeyword_TrueForKeywords()
     {
-        Assert.True(new Token(TokenType.If, "if", SourceLocation.Empty).IsKeyword);
-        Assert.True(new Token(TokenType.Function, "function", SourceLocation.Empty).IsKeyword);
-        Assert.True(new Token(TokenType.Class, "class", SourceLocation.Empty).IsKeyword);
-        Assert.True(new Token(TokenType.Null, "null", SourceLocation.Empty).IsKeyword);
+        Assert.True(new Token(TokenType.If, new SourceSlice("if"), SourceLocation.Empty).IsKeyword);
+        Assert.True(new Token(TokenType.Function, new SourceSlice("function"), SourceLocation.Empty).IsKeyword);
+        Assert.True(new Token(TokenType.Class, new SourceSlice("class"), SourceLocation.Empty).IsKeyword);
+        Assert.True(new Token(TokenType.Null, new SourceSlice("null"), SourceLocation.Empty).IsKeyword);
     }
 
     [Fact]
     public void Token_IsKeyword_FalseForNonKeywords()
     {
-        Assert.False(new Token(TokenType.Identifier, "myVar", SourceLocation.Empty).IsKeyword);
-        Assert.False(new Token(TokenType.Number, "42", SourceLocation.Empty).IsKeyword);
-        Assert.False(new Token(TokenType.Plus, "+", SourceLocation.Empty).IsKeyword);
+        Assert.False(new Token(TokenType.Identifier, new SourceSlice("myVar"), SourceLocation.Empty).IsKeyword);
+        Assert.False(new Token(TokenType.Number, new SourceSlice("42"), SourceLocation.Empty).IsKeyword);
+        Assert.False(new Token(TokenType.Plus, new SourceSlice("+"), SourceLocation.Empty).IsKeyword);
     }
 
     [Fact]
     public void Token_IsLiteral_TrueForLiterals()
     {
-        Assert.True(new Token(TokenType.Number, "42", SourceLocation.Empty, 42.0).IsLiteral);
-        Assert.True(new Token(TokenType.String, "\"hello\"", SourceLocation.Empty, "hello").IsLiteral);
-        Assert.True(new Token(TokenType.True, "true", SourceLocation.Empty).IsLiteral);
-        Assert.True(new Token(TokenType.False, "false", SourceLocation.Empty).IsLiteral);
-        Assert.True(new Token(TokenType.Null, "null", SourceLocation.Empty).IsLiteral);
+        Assert.True(new Token(TokenType.Number, new SourceSlice("42"), SourceLocation.Empty, 42.0).IsLiteral);
+        Assert.True(new Token(TokenType.String, new SourceSlice("\"hello\""), SourceLocation.Empty, "hello").IsLiteral);
+        Assert.True(new Token(TokenType.True, new SourceSlice("true"), SourceLocation.Empty).IsLiteral);
+        Assert.True(new Token(TokenType.False, new SourceSlice("false"), SourceLocation.Empty).IsLiteral);
+        Assert.True(new Token(TokenType.Null, new SourceSlice("null"), SourceLocation.Empty).IsLiteral);
     }
 
     [Fact]
     public void Token_IsAssignmentOperator_CorrectRange()
     {
-        Assert.True(new Token(TokenType.Assign, "=", SourceLocation.Empty).IsAssignmentOperator);
-        Assert.True(new Token(TokenType.PlusAssign, "+=", SourceLocation.Empty).IsAssignmentOperator);
-        Assert.True(new Token(TokenType.NullishCoalescingAssign, "??=", SourceLocation.Empty).IsAssignmentOperator);
+        Assert.True(new Token(TokenType.Assign, new SourceSlice("="), SourceLocation.Empty).IsAssignmentOperator);
+        Assert.True(new Token(TokenType.PlusAssign, new SourceSlice("+="), SourceLocation.Empty).IsAssignmentOperator);
+        Assert.True(new Token(TokenType.NullishCoalescingAssign, new SourceSlice("??="), SourceLocation.Empty).IsAssignmentOperator);
         
-        Assert.False(new Token(TokenType.Plus, "+", SourceLocation.Empty).IsAssignmentOperator);
-        Assert.False(new Token(TokenType.Equal, "==", SourceLocation.Empty).IsAssignmentOperator);
+        Assert.False(new Token(TokenType.Plus, new SourceSlice("+"), SourceLocation.Empty).IsAssignmentOperator);
+        Assert.False(new Token(TokenType.Equal, new SourceSlice("=="), SourceLocation.Empty).IsAssignmentOperator);
     }
 
     [Fact]
     public void Token_IsComparisonOperator_CorrectRange()
     {
-        Assert.True(new Token(TokenType.LessThan, "<", SourceLocation.Empty).IsComparisonOperator);
-        Assert.True(new Token(TokenType.StrictEqual, "===", SourceLocation.Empty).IsComparisonOperator);
+        Assert.True(new Token(TokenType.LessThan, new SourceSlice("<"), SourceLocation.Empty).IsComparisonOperator);
+        Assert.True(new Token(TokenType.StrictEqual, new SourceSlice("==="), SourceLocation.Empty).IsComparisonOperator);
         
-        Assert.False(new Token(TokenType.Assign, "=", SourceLocation.Empty).IsComparisonOperator);
-        Assert.False(new Token(TokenType.LogicalAnd, "&&", SourceLocation.Empty).IsComparisonOperator);
+        Assert.False(new Token(TokenType.Assign, new SourceSlice("="), SourceLocation.Empty).IsComparisonOperator);
+        Assert.False(new Token(TokenType.LogicalAnd, new SourceSlice("&&"), SourceLocation.Empty).IsComparisonOperator);
     }
 
     [Fact]
     public void Token_GetStringValue_ReturnsValueForStrings()
     {
-        var token = new Token(TokenType.String, "\"hello\"", SourceLocation.Empty, "hello");
+        var token = new Token(TokenType.String, new SourceSlice("\"hello\""), SourceLocation.Empty, "hello");
         Assert.Equal("hello", token.GetStringValue());
     }
 
     [Fact]
     public void Token_GetStringValue_ReturnsNullForNonStrings()
     {
-        var token = new Token(TokenType.Number, "42", SourceLocation.Empty, 42.0);
+        var token = new Token(TokenType.Number, new SourceSlice("42"), SourceLocation.Empty, 42.0);
         Assert.Null(token.GetStringValue());
     }
 
     [Fact]
     public void Token_GetNumberValue_ReturnsValueForNumbers()
     {
-        var token = new Token(TokenType.Number, "42", SourceLocation.Empty, 42.0);
+        var token = new Token(TokenType.Number, new SourceSlice("42"), SourceLocation.Empty, 42.0);
         Assert.Equal(42.0, token.GetNumberValue());
     }
 
     [Fact]
     public void Token_GetNumberValue_ReturnsNullForNonNumbers()
     {
-        var token = new Token(TokenType.String, "\"42\"", SourceLocation.Empty, "42");
+        var token = new Token(TokenType.String, new SourceSlice("\"42\""), SourceLocation.Empty, "42");
         Assert.Null(token.GetNumberValue());
     }
 
     [Fact]
     public void Token_GetNumberValue_HandlesIntegerValues()
     {
-        var token = new Token(TokenType.Number, "42", SourceLocation.Empty, 42L);
+        var token = new Token(TokenType.Number, new SourceSlice("42"), SourceLocation.Empty, 42L);
         Assert.Equal(42.0, token.GetNumberValue());
     }
 
     [Fact]
     public void Token_ToString_IncludesTypeTextAndLocation()
     {
-        var token = new Token(TokenType.Identifier, "myVar", new SourceLocation("test.js", 1, 5));
+        var token = new Token(TokenType.Identifier, new SourceSlice("myVar"), new SourceLocation("test.js", 1, 5));
         var str = token.ToString();
         
         Assert.Contains("Identifier", str);
@@ -364,23 +364,23 @@ public class TokenTests
     [Fact]
     public void Token_IsStrictModeReserved_TrueForReservedWords()
     {
-        Assert.True(new Token(TokenType.Implements, "implements", SourceLocation.Empty).IsStrictModeReserved);
-        Assert.True(new Token(TokenType.Interface, "interface", SourceLocation.Empty).IsStrictModeReserved);
-        Assert.True(new Token(TokenType.Package, "package", SourceLocation.Empty).IsStrictModeReserved);
-        Assert.True(new Token(TokenType.Private, "private", SourceLocation.Empty).IsStrictModeReserved);
-        Assert.True(new Token(TokenType.Protected, "protected", SourceLocation.Empty).IsStrictModeReserved);
-        Assert.True(new Token(TokenType.Public, "public", SourceLocation.Empty).IsStrictModeReserved);
-        Assert.True(new Token(TokenType.Let, "let", SourceLocation.Empty).IsStrictModeReserved);
-        Assert.True(new Token(TokenType.Yield, "yield", SourceLocation.Empty).IsStrictModeReserved);
-        Assert.True(new Token(TokenType.Static, "static", SourceLocation.Empty).IsStrictModeReserved);
+        Assert.True(new Token(TokenType.Implements, new SourceSlice("implements"), SourceLocation.Empty).IsStrictModeReserved);
+        Assert.True(new Token(TokenType.Interface, new SourceSlice("interface"), SourceLocation.Empty).IsStrictModeReserved);
+        Assert.True(new Token(TokenType.Package, new SourceSlice("package"), SourceLocation.Empty).IsStrictModeReserved);
+        Assert.True(new Token(TokenType.Private, new SourceSlice("private"), SourceLocation.Empty).IsStrictModeReserved);
+        Assert.True(new Token(TokenType.Protected, new SourceSlice("protected"), SourceLocation.Empty).IsStrictModeReserved);
+        Assert.True(new Token(TokenType.Public, new SourceSlice("public"), SourceLocation.Empty).IsStrictModeReserved);
+        Assert.True(new Token(TokenType.Let, new SourceSlice("let"), SourceLocation.Empty).IsStrictModeReserved);
+        Assert.True(new Token(TokenType.Yield, new SourceSlice("yield"), SourceLocation.Empty).IsStrictModeReserved);
+        Assert.True(new Token(TokenType.Static, new SourceSlice("static"), SourceLocation.Empty).IsStrictModeReserved);
     }
 
     [Fact]
     public void Token_IsStrictModeReserved_FalseForNonReserved()
     {
-        Assert.False(new Token(TokenType.If, "if", SourceLocation.Empty).IsStrictModeReserved);
-        Assert.False(new Token(TokenType.Function, "function", SourceLocation.Empty).IsStrictModeReserved);
-        Assert.False(new Token(TokenType.Identifier, "myVar", SourceLocation.Empty).IsStrictModeReserved);
+        Assert.False(new Token(TokenType.If, new SourceSlice("if"), SourceLocation.Empty).IsStrictModeReserved);
+        Assert.False(new Token(TokenType.Function, new SourceSlice("function"), SourceLocation.Empty).IsStrictModeReserved);
+        Assert.False(new Token(TokenType.Identifier, new SourceSlice("myVar"), SourceLocation.Empty).IsStrictModeReserved);
     }
 
     #endregion

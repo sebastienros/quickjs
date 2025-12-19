@@ -50,8 +50,8 @@ public class LexerTests
         var lexer = new Lexer("myVariable");
         var token = lexer.NextToken();
         Assert.Equal(TokenType.Identifier, token.Type);
-        Assert.Equal("myVariable", token.Text);
-        Assert.Equal("myVariable", token.Value);
+        Assert.Equal("myVariable", token.Text.ToString());
+        Assert.Null(token.Value);
     }
 
     [Theory]
@@ -68,7 +68,7 @@ public class LexerTests
         var lexer = new Lexer(identifier);
         var token = lexer.NextToken();
         Assert.Equal(TokenType.Identifier, token.Type);
-        Assert.Equal(identifier, token.Text);
+        Assert.Equal(identifier, token.Text.ToString());
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public class LexerTests
         var lexer = new Lexer("日本語");
         var token = lexer.NextToken();
         Assert.Equal(TokenType.Identifier, token.Type);
-        Assert.Equal("日本語", token.Text);
+        Assert.Equal("日本語", token.Text.ToString());
     }
 
     [Fact]
@@ -86,9 +86,9 @@ public class LexerTests
         var lexer = new Lexer("foo bar baz");
         var tokens = lexer.TokenizeAll();
         Assert.Equal(4, tokens.Count);
-        Assert.Equal("foo", tokens[0].Text);
-        Assert.Equal("bar", tokens[1].Text);
-        Assert.Equal("baz", tokens[2].Text);
+        Assert.Equal("foo", tokens[0].Text.ToString());
+        Assert.Equal("bar", tokens[1].Text.ToString());
+        Assert.Equal("baz", tokens[2].Text.ToString());
     }
 
     #endregion
@@ -141,7 +141,7 @@ public class LexerTests
         var lexer = new Lexer(keyword);
         var token = lexer.NextToken();
         Assert.Equal(expected, token.Type);
-        Assert.Equal(keyword, token.Text);
+        Assert.Equal(keyword, token.Text.ToString());
     }
 
     [Theory]
@@ -166,7 +166,7 @@ public class LexerTests
         var lexer = new Lexer("iffy");
         var token = lexer.NextToken();
         Assert.Equal(TokenType.Identifier, token.Type);
-        Assert.Equal("iffy", token.Text);
+        Assert.Equal("iffy", token.Text.ToString());
     }
 
     #endregion
@@ -262,7 +262,7 @@ public class LexerTests
         var lexer = new Lexer("123n");
         var token = lexer.NextToken();
         Assert.Equal(TokenType.Number, token.Type);
-        Assert.Equal("123n", token.Text);
+        Assert.Equal("123n", token.Text.ToString());
         // BigInt is stored as long
         Assert.Equal(123L, token.Value);
     }
@@ -274,7 +274,7 @@ public class LexerTests
         var lexer = new Lexer("0b1010n");
         var token = lexer.NextToken();
         Assert.Equal(TokenType.Number, token.Type);
-        Assert.True(token.Text == "0b1010n", $"Expected text '0b1010n' but got '{token.Text}'");
+        Assert.True(token.Text.Span.SequenceEqual("0b1010n"), $"Expected text '0b1010n' but got '{token.Text}'");
         var actualType = token.Value?.GetType()?.Name ?? "null";
         var actualValue = token.Value;
         Assert.True(token.Value is long, $"Expected long but got {actualType} with value {actualValue}, text='{token.Text}'");
@@ -287,7 +287,7 @@ public class LexerTests
         var lexer = new Lexer("0xFFn");
         var token = lexer.NextToken();
         Assert.Equal(TokenType.Number, token.Type);
-        Assert.Equal("0xFFn", token.Text);
+        Assert.Equal("0xFFn", token.Text.ToString());
         Assert.Equal(255L, token.Value);
     }
 
@@ -297,7 +297,7 @@ public class LexerTests
         var lexer = new Lexer("0o777n");
         var token = lexer.NextToken();
         Assert.Equal(TokenType.Number, token.Type);
-        Assert.Equal("0o777n", token.Text);
+        Assert.Equal("0o777n", token.Text.ToString());
         Assert.Equal(511L, token.Value);
     }
 
@@ -388,8 +388,8 @@ public class LexerTests
         var lexer = new Lexer("a // comment\nb");
         var tokens = lexer.TokenizeAll();
         Assert.Equal(3, tokens.Count);
-        Assert.Equal("a", tokens[0].Text);
-        Assert.Equal("b", tokens[1].Text);
+        Assert.Equal("a", tokens[0].Text.ToString());
+        Assert.Equal("b", tokens[1].Text.ToString());
         Assert.True(tokens[1].HasLineTerminatorBefore);
     }
 
@@ -399,8 +399,8 @@ public class LexerTests
         var lexer = new Lexer("a /* comment */ b");
         var tokens = lexer.TokenizeAll();
         Assert.Equal(3, tokens.Count);
-        Assert.Equal("a", tokens[0].Text);
-        Assert.Equal("b", tokens[1].Text);
+        Assert.Equal("a", tokens[0].Text.ToString());
+        Assert.Equal("b", tokens[1].Text.ToString());
     }
 
     [Fact]
@@ -432,7 +432,7 @@ public class LexerTests
         var lexer = new Lexer(source);
         var token = lexer.NextToken();
         Assert.Equal(expected, token.Type);
-        Assert.Equal(source, token.Text);
+        Assert.Equal(source, token.Text.ToString());
     }
 
     #endregion
@@ -543,7 +543,7 @@ public class LexerTests
         var lexer = new Lexer("#privateField");
         var token = lexer.NextToken();
         Assert.Equal(TokenType.PrivateName, token.Type);
-        Assert.Equal("#privateField", token.Text);
+        Assert.Equal("#privateField", token.Text.ToString());
     }
 
     #endregion
