@@ -164,6 +164,55 @@ public class EvalTests
     }
 
     [Fact]
+    public void WithStatement_ResolvesProperties()
+    {
+        var result = _context.Evaluate(@"
+            var obj = { x: 2 };
+            with (obj) { x; }
+        ");
+        Assert.False(_context.HasException, _context.HasException ? GetExceptionMessage() : "");
+        Assert.True(result.IsNumber);
+        Assert.Equal(2, result.ToInt32());
+
+        string GetExceptionMessage()
+        {
+            var exVal = _context.GetAndClearException();
+            if (exVal.IsObject)
+            {
+                var exObj = exVal.AsObject();
+                var msgVal = exObj.Get("message");
+                return msgVal.IsString ? msgVal.ToString()! : exVal.ToString()!;
+            }
+            return exVal.ToString()!;
+        }
+    }
+
+    [Fact]
+    public void WithStatement_AssignmentUpdatesObject()
+    {
+        var result = _context.Evaluate(@"
+            var obj = { x: 1 };
+            with (obj) { x = 5; }
+            obj.x;
+        ");
+        Assert.False(_context.HasException, _context.HasException ? GetExceptionMessage() : "");
+        Assert.True(result.IsNumber);
+        Assert.Equal(5, result.ToInt32());
+
+        string GetExceptionMessage()
+        {
+            var exVal = _context.GetAndClearException();
+            if (exVal.IsObject)
+            {
+                var exObj = exVal.AsObject();
+                var msgVal = exObj.Get("message");
+                return msgVal.IsString ? msgVal.ToString()! : exVal.ToString()!;
+            }
+            return exVal.ToString()!;
+        }
+    }
+
+    [Fact]
     public void TemplateLiteral_WithExpressions_Works()
     {
         var result = _context.Evaluate("`a${1}b${2}`");

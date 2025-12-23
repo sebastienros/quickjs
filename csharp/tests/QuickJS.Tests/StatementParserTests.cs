@@ -105,6 +105,36 @@ public class StatementParserTests
         Assert.True(parser.CurrentToken.IsEOF);
     }
 
+    [Fact]
+    public void ParseStatement_RegExpLiteral_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("var r = /abc/i;", "test.js", atoms);
+        parser.ParseStatement();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
+    [Fact]
+    public void ParseStatement_CallWithTrailingComma_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("foo(1, 2,);", "test.js", atoms);
+        parser.ParseStatement();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
+    [Fact]
+    public void ParseStatement_CallWithSpreadTrailingComma_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("foo(...args,);", "test.js", atoms);
+        parser.ParseStatement();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
     #endregion
 
     #region Variable Declarations
@@ -346,6 +376,118 @@ public class StatementParserTests
         var atoms = new AtomTable();
         var parser = new Parser("for (;;) { break; }", "test.js", atoms);
         parser.ParseStatement();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
+    [Fact]
+    public void ParseStatement_ForInLoopWithVar_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("for (var key in obj) { }", "test.js", atoms);
+        parser.ParseStatement();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
+    [Fact]
+    public void ParseStatement_ForInLoopWithIdentifier_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("for (key in obj) { }", "test.js", atoms);
+        parser.ParseStatement();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
+    [Fact]
+    public void ParseStatement_ForOfLoopWithLet_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("for (let value of list) { }", "test.js", atoms);
+        parser.ParseStatement();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
+    [Fact]
+    public void ParseStatement_ForAwaitOfLoop_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("for await (value of list) { }", "test.js", atoms);
+        parser.ParseStatement();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
+    [Fact]
+    public void ParseStatement_ForOfLoopWithDestructuringPattern_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("for ({ x } of list) { }", "test.js", atoms);
+        parser.ParseStatement();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
+    #endregion
+
+    #region With Statement
+
+    [Fact]
+    public void ParseStatement_WithStatement_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("with (obj) { x; }", "test.js", atoms);
+        parser.ParseStatement();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
+    #endregion
+
+    #region Labeled Statements
+
+    [Fact]
+    public void ParseStatement_LabeledLoopWithBreak_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("outer: while (true) { break outer; }", "test.js", atoms);
+        parser.ParseStatement();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
+    [Fact]
+    public void ParseStatement_LabeledLoopWithContinue_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("outer: while (true) { continue outer; }", "test.js", atoms);
+        parser.ParseStatement();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
+    #endregion
+
+    #region Update/Delete Expressions
+
+    [Fact]
+    public void ParseStatement_PrefixAndPostfixUpdate_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("++x; x++; --y; y--;", "test.js", atoms);
+        parser.ParseProgram();
+
+        Assert.True(parser.CurrentToken.IsEOF);
+    }
+
+    [Fact]
+    public void ParseStatement_DeleteExpression_Succeeds()
+    {
+        var atoms = new AtomTable();
+        var parser = new Parser("delete x; delete obj.prop;", "test.js", atoms);
+        parser.ParseProgram();
 
         Assert.True(parser.CurrentToken.IsEOF);
     }

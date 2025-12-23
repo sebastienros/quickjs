@@ -71,6 +71,43 @@ public sealed class ByteCodeBuffer
         _size = newSize;
         if (_lastOpcodePosition >= newSize)
             _lastOpcodePosition = -1;
+
+        // Drop label markers and relocations that point into truncated bytecode.
+        for (int i = 0; i < _labels.Count; i++)
+        {
+            var label = _labels[i];
+            if (label.Position >= newSize)
+            {
+                label.Position = -1;
+            }
+
+            RelocEntry? prev = null;
+            var entry = label.FirstReloc;
+            while (entry != null)
+            {
+                var next = entry.Next;
+                if (entry.Address >= newSize)
+                {
+                    if (prev == null)
+                    {
+                        label.FirstReloc = next;
+                    }
+                    else
+                    {
+                        prev.Next = next;
+                    }
+                    if (label.ReferenceCount > 0)
+                    {
+                        label.ReferenceCount--;
+                    }
+                }
+                else
+                {
+                    prev = entry;
+                }
+                entry = next;
+            }
+        }
     }
 
     /// <summary>

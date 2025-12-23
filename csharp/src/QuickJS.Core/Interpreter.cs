@@ -2397,6 +2397,38 @@ public sealed class Interpreter
         return JSValue.Undefined;
     }
 
+    private JSValue ToObjectValue(in JSValue value)
+    {
+        if (value.IsNull || value.IsUndefined)
+        {
+            _context.ThrowTypeError("Cannot convert undefined or null to object");
+            return JSValue.Undefined;
+        }
+
+        if (value.IsObject)
+        {
+            return value;
+        }
+
+        if (value.IsString)
+        {
+            var stringProto = _context.GetClassPrototype(JSClassId.String) ?? _context.GetClassPrototype(JSClassId.Object);
+            return JSValue.FromObject(new JSObject(stringProto, JSClassId.String) { InternalValue = value });
+        }
+        if (value.IsNumber)
+        {
+            var numberProto = _context.GetClassPrototype(JSClassId.Number) ?? _context.GetClassPrototype(JSClassId.Object);
+            return JSValue.FromObject(new JSObject(numberProto, JSClassId.Number) { InternalValue = value });
+        }
+        if (value.IsBool)
+        {
+            var boolProto = _context.GetClassPrototype(JSClassId.Boolean) ?? _context.GetClassPrototype(JSClassId.Object);
+            return JSValue.FromObject(new JSObject(boolProto, JSClassId.Boolean) { InternalValue = value });
+        }
+
+        return JSValue.FromObject(_context.GlobalObject);
+    }
+
     /// <summary>
     /// Sets a property value on an object.
     /// </summary>
@@ -2421,6 +2453,30 @@ public sealed class Interpreter
 
         // Primitives - silently ignore (or throw in strict mode)
         // TODO: Handle strict mode
+    }
+
+    private bool IsUnscopable(JSObject obj, string propertyName)
+    {
+        var unscopablesKey = JSSymbol.Unscopables.Description ?? "Symbol.unscopables";
+        var unscopablesVal = obj.Get(unscopablesKey);
+        if (!unscopablesVal.IsObject)
+        {
+            return false;
+        }
+
+        var unscopablesObj = unscopablesVal.AsObject();
+        if (unscopablesObj == null)
+        {
+            return false;
+        }
+
+        if (!unscopablesObj.HasProperty(propertyName))
+        {
+            return false;
+        }
+
+        var value = unscopablesObj.Get(propertyName);
+        return JSValueConversion.ToBoolean(value);
     }
 
     /// <summary>
@@ -2644,6 +2700,13 @@ public sealed class Interpreter
             case OpCode.PushTrue:
                 PushTrue();
                 return true;
+            case OpCode.Object:
+                {
+                    var proto = _context.GetClassPrototype(JSClassId.Object);
+                    var obj = new JSObject(proto, JSClassId.Object);
+                    Push(JSValue.FromObject(obj));
+                    return true;
+                }
             case OpCode.PushThis:
                 if (_currentFrame != null)
                     Push(_currentFrame.ThisValue);
@@ -3763,6 +3826,150 @@ public sealed class Interpreter
                     }
                     break;
 
+                case OpCode.ToObject:
+                    {
+                        if (_stackPointer < 1)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow");
+                            return JSValue.Exception;
+                        }
+                        var value = Pop();
+                        var obj = ToObjectValue(value);
+                        if (_context.HasException)
+                        {
+                            return JSValue.Exception;
+                        }
+                        Push(obj);
+                    }
+                    break;
+
+                case OpCode.Delete:
+                    {
+                        if (_stackPointer < 1)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow");
+                            return JSValue.Exception;
+                        }
+                        Pop();
+                        Push(JSValue.True);
+                    }
+                    break;
+
+                case OpCode.DeleteVar:
+                    {
+                        if (pc + 4 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        uint atom = (uint)(bytecode[pc] |
+                                          (bytecode[pc + 1] << 8) |
+                                          (bytecode[pc + 2] << 16) |
+                                          (bytecode[pc + 3] << 24));
+                        pc += 4;
+                        string name = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        bool deleted = _context.GlobalObject.Delete(name);
+                        Push(JSValue.FromBoolean(deleted));
+                    }
+                    break;
+
+                case OpCode.WithGetVar:
+                case OpCode.WithPutVar:
+                case OpCode.WithDeleteVar:
+                case OpCode.WithMakeRef:
+                case OpCode.WithGetRef:
+                    {
+                        if (pc + 9 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        uint atom = (uint)(bytecode[pc] |
+                                          (bytecode[pc + 1] << 8) |
+                                          (bytecode[pc + 2] << 16) |
+                                          (bytecode[pc + 3] << 24));
+                        int diff = bytecode[pc + 4] |
+                                   (bytecode[pc + 5] << 8) |
+                                   (bytecode[pc + 6] << 16) |
+                                   (bytecode[pc + 7] << 24);
+                        byte isWith = bytecode[pc + 8];
+                        pc += 9;
+
+                        string name = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        if (_stackPointer < 1)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow");
+                            return JSValue.Exception;
+                        }
+
+                        var objVal = Peek();
+                        if (!objVal.IsObject)
+                        {
+                            Pop();
+                            break;
+                        }
+
+                        var obj = objVal.AsObject();
+                        if (obj == null)
+                        {
+                            Pop();
+                            break;
+                        }
+
+                        bool hasProperty = obj.HasProperty(name);
+                        if (hasProperty && isWith != 0 && IsUnscopable(obj, name))
+                        {
+                            hasProperty = false;
+                        }
+
+                        if (hasProperty)
+                        {
+                            switch (opcode)
+                            {
+                                case OpCode.WithGetVar:
+                                    {
+                                        var value = obj.Get(name);
+                                        _stack[_stackPointer - 1] = value;
+                                    }
+                                    break;
+                                case OpCode.WithPutVar:
+                                    {
+                                        if (_stackPointer < 2)
+                                        {
+                                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow");
+                                            return JSValue.Exception;
+                                        }
+                                        var value = _stack[_stackPointer - 2];
+                                        obj.Set(name, value);
+                                        _stackPointer -= 2;
+                                    }
+                                    break;
+                                case OpCode.WithDeleteVar:
+                                    {
+                                        bool deleted = obj.Delete(name);
+                                        _stack[_stackPointer - 1] = JSValue.FromBoolean(deleted);
+                                    }
+                                    break;
+                                case OpCode.WithMakeRef:
+                                    Push(JSValue.FromString(name));
+                                    break;
+                                case OpCode.WithGetRef:
+                                    {
+                                        var value = obj.Get(name);
+                                        Push(value);
+                                    }
+                                    break;
+                            }
+
+                            pc += diff - 5;
+                        }
+                        else
+                        {
+                            Pop();
+                        }
+                    }
+                    break;
+
                 // Short opcodes for common local indices
                 case OpCode.GetLoc0:
                     GetLoc(0);
@@ -4232,7 +4439,7 @@ public sealed class Interpreter
         _currentFrame = _currentFrame?.Parent;
         if (_currentFrame == null)
         {
-            _context.ThrowError(JSErrorType.Error, exVal.ToString() ?? "Exception");
+            _context.SetException(exVal);
             return false;
         }
         // Let caller loop handle continuation

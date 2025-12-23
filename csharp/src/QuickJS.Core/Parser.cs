@@ -52,6 +52,7 @@ public sealed class Parser
     private JSFunctionDef _currentFunction;
     private bool _isModule;
     private readonly DiagnosticBag _diagnostics = new DiagnosticBag();
+    private readonly List<int> _withScopeStack = new List<int>();
     
     // LHS tracking for assignment
     private enum LhsKind { None, GlobalVar, LocalVar, Argument, Property }
@@ -59,6 +60,8 @@ public sealed class Parser
     private JSAtom _lastLhsAtom = JSAtom.Empty;
     private int _lastLhsIndex = -1;
     private int _lastLhsBytecodePos = -1;  // Position before LHS bytecode
+    private bool _lastLhsWithScope = false;
+    private const string WithScopeVarName = "__with__";
 
     /// <summary>
     /// Creates a new parser.
@@ -365,6 +368,56 @@ public sealed class Parser
         return TokenType.EOF;
     }
 
+    /// <summary>
+    /// Looks ahead to determine whether the current for-header contains 'in' or 'of'
+    /// at top-level before the first semicolon or closing paren.
+    /// </summary>
+    private TokenType PeekForInOfToken()
+    {
+        var savedPos = _lexer.SavePosition();
+        var savedToken = _currentToken;
+        int depth = 0;
+
+        while (true)
+        {
+            var type = _currentToken.Type;
+            if (depth == 0 && (type == TokenType.In || type == TokenType.Of))
+            {
+                _lexer.RestorePosition(savedPos);
+                _currentToken = savedToken;
+                return type;
+            }
+
+            if (depth == 0 && (type == TokenType.Semicolon || type == TokenType.RightParen || type == TokenType.EOF))
+            {
+                break;
+            }
+
+            switch (type)
+            {
+                case TokenType.LeftParen:
+                case TokenType.LeftBracket:
+                case TokenType.LeftBrace:
+                    depth++;
+                    break;
+                case TokenType.RightParen:
+                case TokenType.RightBracket:
+                case TokenType.RightBrace:
+                    if (depth > 0)
+                    {
+                        depth--;
+                    }
+                    break;
+            }
+
+            NextToken();
+        }
+
+        _lexer.RestorePosition(savedPos);
+        _currentToken = savedToken;
+        return TokenType.EOF;
+    }
+
     #endregion
 
     #region Bytecode Emission
@@ -397,6 +450,41 @@ public sealed class Parser
     private void EmitAtom(JSAtom atom)
     {
         _currentFunction.ByteCode.EmitU32((uint)atom.Value);
+    }
+
+    private void EmitWithVarOp(OpCode op, JSAtom atom, int label, bool isWith)
+    {
+        EmitOp(op);
+        EmitAtom(atom);
+        int diffPos = _currentFunction.ByteCode.Size;
+        EmitU32(0);
+        EmitU8(isWith ? (byte)1 : (byte)0);
+
+        var labelInfo = _currentFunction.ByteCode.GetLabel(label);
+        labelInfo.AddReference();
+        labelInfo.AddRelocation(diffPos, 0);
+    }
+
+    private void EmitWithPutVarChain(JSAtom atom, int labelDone)
+    {
+        for (int i = _withScopeStack.Count - 1; i >= 0; i--)
+        {
+            EmitOp(OpCode.Dup);
+            EmitOp(OpCode.GetLoc);
+            EmitU16((ushort)_withScopeStack[i]);
+            EmitWithVarOp(OpCode.WithPutVar, atom, labelDone, isWith: true);
+            EmitOp(OpCode.Drop);
+        }
+    }
+
+    private void EmitWithDeleteVarChain(JSAtom atom, int labelDone)
+    {
+        for (int i = _withScopeStack.Count - 1; i >= 0; i--)
+        {
+            EmitOp(OpCode.GetLoc);
+            EmitU16((ushort)_withScopeStack[i]);
+            EmitWithVarOp(OpCode.WithDeleteVar, atom, labelDone, isWith: true);
+        }
     }
 
     private int NewLabel()
@@ -531,6 +619,8 @@ public sealed class Parser
             var lhsIndex = _lastLhsIndex;
             var lhsBytecodePos = _lastLhsBytecodePos;
             _lastLhsKind = LhsKind.None;
+            var lhsWithScope = _lastLhsWithScope;
+            _lastLhsWithScope = false;
             
             NextToken(); // consume the assignment operator
 
@@ -593,7 +683,14 @@ public sealed class Parser
                 
                 // Parse RHS (right-associative)
                 ParseAssignExpression(flags);
-                
+
+                int labelDone = -1;
+                if (lhsWithScope && _withScopeStack.Count > 0)
+                {
+                    labelDone = NewLabel();
+                    EmitWithPutVarChain(lhsAtom, labelDone);
+                }
+
                 // Emit appropriate store based on LHS kind
                 switch (lhsKind)
                 {
@@ -621,6 +718,11 @@ public sealed class Parser
                         // Fallback to PutRefValue (might not work for all cases)
                         EmitOp(OpCode.PutRefValue);
                         break;
+                }
+
+                if (labelDone >= 0)
+                {
+                    EmitLabel(labelDone);
                 }
             }
         }
@@ -997,24 +1099,64 @@ public sealed class Parser
 
             case TokenType.Delete:
                 NextToken();
-                // TODO: Handle delete properly (needs special handling for member expressions)
-                ParseUnaryExpression(ParseFlags.PowForbidden);
-                EmitOp(OpCode.Drop);
-                EmitOp(OpCode.PushTrue);
+                if (Check(TokenType.Identifier))
+                {
+                    var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
+                    if (PeekToken(noLineTerminator: false) == TokenType.Dot ||
+                        PeekToken(noLineTerminator: false) == TokenType.LeftBracket)
+                    {
+                        ParsePostfixExpression(ParseFlags.None);
+                        EmitOp(OpCode.Delete);
+                    }
+                    else
+                    {
+                        NextToken();
+                        if (_withScopeStack.Count > 0)
+                        {
+                            int labelDone = NewLabel();
+                            EmitWithDeleteVarChain(atom, labelDone);
+                            EmitOp(OpCode.DeleteVar);
+                            EmitAtom(atom);
+                            EmitLabel(labelDone);
+                        }
+                        else
+                        {
+                            EmitOp(OpCode.DeleteVar);
+                            EmitAtom(atom);
+                        }
+                    }
+                }
+                else
+                {
+                    ParsePostfixExpression(ParseFlags.None);
+                    EmitOp(OpCode.Delete);
+                }
                 break;
 
             case TokenType.Increment:
                 NextToken();
-                // TODO: Handle pre-increment (++x)
-                ParseUnaryExpression(ParseFlags.PowForbidden);
-                EmitOp(OpCode.Inc);
+                ParsePostfixExpression(ParseFlags.None);
+                if (_lastLhsKind != LhsKind.None)
+                {
+                    EmitPrefixUpdate(OpCode.Inc);
+                }
+                else
+                {
+                    EmitOp(OpCode.Inc);
+                }
                 break;
 
             case TokenType.Decrement:
                 NextToken();
-                // TODO: Handle pre-decrement (--x)
-                ParseUnaryExpression(ParseFlags.PowForbidden);
-                EmitOp(OpCode.Dec);
+                ParsePostfixExpression(ParseFlags.None);
+                if (_lastLhsKind != LhsKind.None)
+                {
+                    EmitPrefixUpdate(OpCode.Dec);
+                }
+                else
+                {
+                    EmitOp(OpCode.Dec);
+                }
                 break;
 
             default:
@@ -1037,14 +1179,26 @@ public sealed class Parser
             {
                 if (Match(TokenType.Increment))
                 {
-                    // TODO: Handle post-increment (x++)
-                    EmitOp(OpCode.PostInc);
+                    if (_lastLhsKind != LhsKind.None)
+                    {
+                        EmitPostfixUpdate(OpCode.Inc);
+                    }
+                    else
+                    {
+                        EmitOp(OpCode.PostInc);
+                    }
                     continue;
                 }
                 if (Match(TokenType.Decrement))
                 {
-                    // TODO: Handle post-decrement (x--)
-                    EmitOp(OpCode.PostDec);
+                    if (_lastLhsKind != LhsKind.None)
+                    {
+                        EmitPostfixUpdate(OpCode.Dec);
+                    }
+                    else
+                    {
+                        EmitOp(OpCode.PostDec);
+                    }
                     continue;
                 }
             }
@@ -1151,7 +1305,7 @@ public sealed class Parser
 
         if (!Check(TokenType.RightParen))
         {
-            do
+            while (true)
             {
                 if (Check(TokenType.Comma))
                 {
@@ -1193,8 +1347,15 @@ public sealed class Parser
                         EmitOp(OpCode.DefineArrayEl);
                     }
                 }
+                if (!Match(TokenType.Comma))
+                {
+                    break;
+                }
+                if (Check(TokenType.RightParen))
+                {
+                    break;
+                }
             }
-            while (Match(TokenType.Comma));
         }
 
         Expect(TokenType.RightParen);
@@ -1223,6 +1384,22 @@ public sealed class Parser
 
             case TokenType.String:
                 EmitStringLiteral();
+                NextToken();
+                break;
+
+            case TokenType.Slash:
+                _currentToken = _lexer.ScanRegExpLiteral(
+                    _currentToken.Start,
+                    _currentToken.Text.Start,
+                    _currentToken.HasLineTerminatorBefore);
+                if (_currentToken.Type != TokenType.RegExp)
+                {
+                    throw ReportError(ParseErrorCode.UnterminatedRegExp, "Unterminated regular expression literal");
+                }
+                goto case TokenType.RegExp;
+
+            case TokenType.RegExp:
+                EmitRegExpLiteral((RegExpLiteral)_currentToken.Value!);
                 NextToken();
                 break;
 
@@ -1485,6 +1662,8 @@ public sealed class Parser
     {
         // Save parent and create new function
         var parentFunction = _currentFunction;
+        var savedWithScopes = _withScopeStack.ToArray();
+        _withScopeStack.Clear();
         var newFunction = new JSFunctionDef(JSAtom.Empty);
         newFunction.Filename = parentFunction.Filename;
         newFunction.Parent = parentFunction;
@@ -1535,6 +1714,10 @@ public sealed class Parser
 
         int funcIdx = parentFunction.AddChildFunction(newFunction);
         _currentFunction = parentFunction;
+        _withScopeStack.Clear();
+        _withScopeStack.AddRange(savedWithScopes);
+        _withScopeStack.Clear();
+        _withScopeStack.AddRange(savedWithScopes);
 
         EmitOp(OpCode.FClosure);
         EmitU32((uint)funcIdx);
@@ -2274,6 +2457,8 @@ public sealed class Parser
     {
         // Create a new function for the static block
         var parentFunction = _currentFunction;
+        var savedWithScopes = _withScopeStack.ToArray();
+        _withScopeStack.Clear();
         var staticBlockName = _atoms.GetOrCreateAtom("static_block");
         var blockFunction = new JSFunctionDef(staticBlockName);
         _currentFunction = blockFunction;
@@ -2303,6 +2488,8 @@ public sealed class Parser
 
         int funcIdx = parentFunction.AddChildFunction(blockFunction);
         _currentFunction = parentFunction;
+        _withScopeStack.Clear();
+        _withScopeStack.AddRange(savedWithScopes);
 
         // Emit the static block execution
         EmitOp(OpCode.FClosure);
@@ -2854,76 +3041,164 @@ public sealed class Parser
         EmitU32((uint)idx);
     }
 
+    private void EmitRegExpLiteral(RegExpLiteral literal)
+    {
+        EmitStringLiteral(literal.Pattern);
+        EmitStringLiteral(literal.Flags);
+        EmitOp(OpCode.RegExp);
+    }
+
     private void EmitIdentifier()
     {
         var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
         
         // Track LHS info for potential assignment
         _lastLhsBytecodePos = _currentFunction.ByteCode.Size;
-        
+        _lastLhsWithScope = _withScopeStack.Count > 0;
+
+        LhsKind resolvedKind;
+        int resolvedIndex = -1;
+
         // First check if this is a function argument
         int argIdx = _currentFunction.FindArg(atom);
         if (argIdx >= 0)
         {
-            _lastLhsKind = LhsKind.Argument;
-            _lastLhsAtom = atom;
-            _lastLhsIndex = argIdx;
-            
-            // Use GetArg opcodes for function parameters
-            switch (argIdx)
-            {
-                case 0: EmitOp(OpCode.GetArg0); break;
-                case 1: EmitOp(OpCode.GetArg1); break;
-                case 2: EmitOp(OpCode.GetArg2); break;
-                case 3: EmitOp(OpCode.GetArg3); break;
-                default:
-                    EmitOp(OpCode.GetArg);
-                    EmitU16((ushort)argIdx);
-                    break;
-            }
-            return;
-        }
-        
-        // Check if this is a known local variable
-        int varIdx = _currentFunction.FindVar(atom);
-        if (varIdx >= 0)
-        {
-            // Check if this is a global var (top-level var in global scope)
-            // For global vars, read from global object property instead of local storage
-            var varDef = _currentFunction.GetVarDef(varIdx);
-            if (_currentFunction.IsGlobalVar && !varDef.IsLexical)
-            {
-                // Global var - read from global object property using PushThis + GetField
-                _lastLhsKind = LhsKind.GlobalVar;
-                _lastLhsAtom = atom;
-                _lastLhsIndex = varIdx;
-                
-                EmitOp(OpCode.PushThis);   // Push global object
-                EmitOp(OpCode.GetField);
-                EmitAtom(atom);
-            }
-            else
-            {
-                // Use GetLoc for local variables (avoids conflicting scope opcodes)
-                _lastLhsKind = LhsKind.LocalVar;
-                _lastLhsAtom = atom;
-                _lastLhsIndex = varIdx;
-                
-                EmitOp(OpCode.GetLoc);
-                EmitU16((ushort)varIdx);
-            }
+            resolvedKind = LhsKind.Argument;
+            resolvedIndex = argIdx;
         }
         else
         {
-            // Unknown variable - try to read from global object property
-            _lastLhsKind = LhsKind.GlobalVar;
-            _lastLhsAtom = atom;
-            _lastLhsIndex = -1;
-            
-            EmitOp(OpCode.PushThis);   // Push global object  
-            EmitOp(OpCode.GetField);
-            EmitAtom(atom);
+            // Check if this is a known local variable
+            int varIdx = _currentFunction.FindVar(atom);
+            if (varIdx >= 0)
+            {
+                var varDef = _currentFunction.GetVarDef(varIdx);
+                if (_currentFunction.IsGlobalVar && !varDef.IsLexical)
+                {
+                    resolvedKind = LhsKind.GlobalVar;
+                }
+                else
+                {
+                    resolvedKind = LhsKind.LocalVar;
+                    resolvedIndex = varIdx;
+                }
+            }
+            else
+            {
+                resolvedKind = LhsKind.GlobalVar;
+            }
         }
+
+        _lastLhsKind = resolvedKind;
+        _lastLhsAtom = atom;
+        _lastLhsIndex = resolvedIndex;
+
+        if (_withScopeStack.Count > 0)
+        {
+            int labelDone = NewLabel();
+            for (int i = _withScopeStack.Count - 1; i >= 0; i--)
+            {
+                EmitOp(OpCode.GetLoc);
+                EmitU16((ushort)_withScopeStack[i]);
+                EmitWithVarOp(OpCode.WithGetVar, atom, labelDone, isWith: true);
+            }
+
+            EmitIdentifierGet(resolvedKind, atom, resolvedIndex);
+            EmitLabel(labelDone);
+        }
+        else
+        {
+            EmitIdentifierGet(resolvedKind, atom, resolvedIndex);
+        }
+    }
+
+    private void EmitIdentifierGet(LhsKind kind, JSAtom atom, int index)
+    {
+        switch (kind)
+        {
+            case LhsKind.Argument:
+                switch (index)
+                {
+                    case 0: EmitOp(OpCode.GetArg0); break;
+                    case 1: EmitOp(OpCode.GetArg1); break;
+                    case 2: EmitOp(OpCode.GetArg2); break;
+                    case 3: EmitOp(OpCode.GetArg3); break;
+                    default:
+                        EmitOp(OpCode.GetArg);
+                        EmitU16((ushort)index);
+                        break;
+                }
+                break;
+            case LhsKind.LocalVar:
+                EmitOp(OpCode.GetLoc);
+                EmitU16((ushort)index);
+                break;
+            case LhsKind.GlobalVar:
+                EmitOp(OpCode.PushThis);
+                EmitOp(OpCode.GetField);
+                EmitAtom(atom);
+                break;
+        }
+    }
+
+    private void EmitPrefixUpdate(OpCode updateOp)
+    {
+        var lhsKind = _lastLhsKind;
+        var lhsAtom = _lastLhsAtom;
+        var lhsIndex = _lastLhsIndex;
+        _lastLhsKind = LhsKind.None;
+
+        EmitOp(updateOp);
+
+        switch (lhsKind)
+        {
+            case LhsKind.GlobalVar:
+                EmitOp(OpCode.Dup);
+                EmitOp(OpCode.PushThis);
+                EmitOp(OpCode.Swap);
+                EmitOp(OpCode.PutField);
+                EmitAtom(lhsAtom);
+                break;
+            case LhsKind.LocalVar:
+                EmitOp(OpCode.SetLoc);
+                EmitU16((ushort)lhsIndex);
+                break;
+            case LhsKind.Argument:
+                EmitOp(OpCode.SetArg);
+                EmitU16((ushort)lhsIndex);
+                break;
+        }
+    }
+
+    private void EmitPostfixUpdate(OpCode updateOp)
+    {
+        var lhsKind = _lastLhsKind;
+        var lhsAtom = _lastLhsAtom;
+        var lhsIndex = _lastLhsIndex;
+        _lastLhsKind = LhsKind.None;
+
+        EmitOp(OpCode.Dup);
+        EmitOp(updateOp);
+
+        switch (lhsKind)
+        {
+            case LhsKind.GlobalVar:
+                EmitOp(OpCode.PushThis);
+                EmitOp(OpCode.Swap);
+                EmitOp(OpCode.PutField);
+                EmitAtom(lhsAtom);
+                break;
+            case LhsKind.LocalVar:
+                EmitOp(OpCode.SetLoc);
+                EmitU16((ushort)lhsIndex);
+                break;
+            case LhsKind.Argument:
+                EmitOp(OpCode.SetArg);
+                EmitU16((ushort)lhsIndex);
+                break;
+        }
+
+        EmitOp(OpCode.Drop);
     }
 
     private void ParseArrayLiteral()
@@ -3157,6 +3432,12 @@ public sealed class Parser
 
     private void ParseStatement(bool preserveCompletionValue)
     {
+        if (Check(TokenType.Identifier) && PeekToken(noLineTerminator: false) == TokenType.Colon)
+        {
+            ParseLabeledStatement(preserveCompletionValue);
+            return;
+        }
+
         switch (_currentToken.Type)
         {
             case TokenType.LeftBrace:
@@ -3199,6 +3480,10 @@ public sealed class Parser
 
             case TokenType.Return:
                 ParseReturnStatement();
+                break;
+
+            case TokenType.With:
+                ParseWithStatement(preserveCompletionValue);
                 break;
 
             case TokenType.Break:
@@ -3512,6 +3797,140 @@ public sealed class Parser
         CollectDestructuringBindings(kind, isLexical, isConst);
     }
 
+    private void SkipDestructuringPatternTokens()
+    {
+        if (Check(TokenType.LeftBracket))
+        {
+            NextToken();
+
+            while (!Check(TokenType.RightBracket))
+            {
+                if (Check(TokenType.Comma))
+                {
+                    NextToken();
+                    continue;
+                }
+
+                bool isRest = Match(TokenType.Ellipsis);
+
+                if (Check(TokenType.Identifier))
+                {
+                    NextToken();
+                }
+                else if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+                {
+                    SkipDestructuringPatternTokens();
+                }
+                else if (!Check(TokenType.RightBracket))
+                {
+                    throw new JSSyntaxError(
+                        $"Expected identifier or destructuring pattern, got {_currentToken.Type}",
+                        _currentToken.Start);
+                }
+
+                if (Check(TokenType.Assign))
+                {
+                    NextToken();
+                    SkipExpression();
+                }
+
+                if (isRest && !Check(TokenType.RightBracket))
+                {
+                    throw new JSSyntaxError(
+                        "Rest element must be last",
+                        _currentToken.Start);
+                }
+
+                if (!Match(TokenType.Comma))
+                    break;
+            }
+
+            Expect(TokenType.RightBracket);
+        }
+        else if (Check(TokenType.LeftBrace))
+        {
+            NextToken();
+
+            while (!Check(TokenType.RightBrace))
+            {
+                bool isRest = Match(TokenType.Ellipsis);
+
+                if (isRest)
+                {
+                    if (Check(TokenType.Identifier))
+                    {
+                        NextToken();
+                    }
+                    else if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+                    {
+                        SkipDestructuringPatternTokens();
+                    }
+                    else
+                    {
+                        throw new JSSyntaxError(
+                            $"Expected identifier or destructuring pattern, got {_currentToken.Type}",
+                            _currentToken.Start);
+                    }
+                }
+                else
+                {
+                    if (Check(TokenType.LeftBracket))
+                    {
+                        NextToken();
+                        SkipExpression();
+                        Expect(TokenType.RightBracket);
+                    }
+                    else if (Check(TokenType.Identifier) || Check(TokenType.String) || Check(TokenType.Number))
+                    {
+                        NextToken();
+                    }
+                    else
+                    {
+                        throw new JSSyntaxError(
+                            $"Expected property name, got {_currentToken.Type}",
+                            _currentToken.Start);
+                    }
+
+                    if (Match(TokenType.Colon))
+                    {
+                        if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+                        {
+                            SkipDestructuringPatternTokens();
+                        }
+                        else if (Check(TokenType.Identifier))
+                        {
+                            NextToken();
+                        }
+                        else
+                        {
+                            throw new JSSyntaxError(
+                                $"Expected identifier in destructuring pattern, got {_currentToken.Type}",
+                                _currentToken.Start);
+                        }
+                    }
+                }
+
+                if (Check(TokenType.Assign))
+                {
+                    NextToken();
+                    SkipExpression();
+                }
+
+                if (isRest && !Check(TokenType.RightBrace))
+                {
+                    throw new JSSyntaxError(
+                        "Rest element must be last",
+                        _currentToken.Start);
+                }
+
+                if (!Match(TokenType.Comma))
+                    break;
+            }
+
+            Expect(TokenType.RightBrace);
+        }
+    }
+
     /// <summary>
     /// Recursively collects destructuring bindings from the pattern.
     /// </summary>
@@ -3756,7 +4175,7 @@ public sealed class Parser
     /// <summary>
     /// Parses a while statement: while (expr) stmt
     /// </summary>
-    public void ParseWhileStatement()
+    public void ParseWhileStatement(string? labelName = null)
     {
         Expect(TokenType.While);
 
@@ -3764,7 +4183,7 @@ public sealed class Parser
         int labelBreak = NewLabel();
 
         // Push break/continue context
-        PushBreakContext(labelBreak, labelContinue);
+        PushBreakContext(labelBreak, labelContinue, labelName);
 
         EmitLabel(labelContinue);
         Expect(TokenType.LeftParen);
@@ -3784,7 +4203,7 @@ public sealed class Parser
     /// <summary>
     /// Parses a do-while statement: do stmt while (expr);
     /// </summary>
-    public void ParseDoWhileStatement()
+    public void ParseDoWhileStatement(string? labelName = null)
     {
         Expect(TokenType.Do);
 
@@ -3792,7 +4211,7 @@ public sealed class Parser
         int labelContinue = NewLabel();
         int labelBreak = NewLabel();
 
-        PushBreakContext(labelBreak, labelContinue);
+        PushBreakContext(labelBreak, labelContinue, labelName);
 
         EmitLabel(labelBody);
         ParseStatement();
@@ -3813,10 +4232,25 @@ public sealed class Parser
     /// <summary>
     /// Parses a for statement: for (init; test; update) stmt
     /// </summary>
-    public void ParseForStatement()
+    public void ParseForStatement(string? labelName = null)
     {
         Expect(TokenType.For);
+        bool isAwait = Match(TokenType.Await);
         Expect(TokenType.LeftParen);
+
+        var forInOfToken = PeekForInOfToken();
+        if (forInOfToken == TokenType.In || forInOfToken == TokenType.Of)
+        {
+            ParseForInOfStatement(isAwait, labelName);
+            return;
+        }
+
+        if (isAwait)
+        {
+            throw new JSSyntaxError(
+                "for await only supports for-of",
+                _currentToken.Start);
+        }
 
         _currentFunction.PushScope();
 
@@ -3851,7 +4285,7 @@ public sealed class Parser
         int labelBody = NewLabel();
         int labelBreak = NewLabel();
 
-        PushBreakContext(labelBreak, labelContinue);
+        PushBreakContext(labelBreak, labelContinue, labelName);
 
         // Test expression
         EmitLabel(labelTest);
@@ -3886,6 +4320,317 @@ public sealed class Parser
         _currentFunction.PopScope();
     }
 
+    private void ParseWithStatement(bool preserveCompletionValue)
+    {
+        Expect(TokenType.With);
+        Expect(TokenType.LeftParen);
+        ParseExpression();
+        Expect(TokenType.RightParen);
+        EmitOp(OpCode.ToObject);
+
+        _currentFunction.PushScope();
+        var withAtom = _atoms.GetOrCreateAtom(WithScopeVarName);
+        int withIdx = _currentFunction.AddVar(withAtom, JSVarKind.Normal, isConst: false, isLexical: true);
+        EmitOp(OpCode.PutLoc);
+        EmitU16((ushort)withIdx);
+
+        _withScopeStack.Add(withIdx);
+        ParseStatement(preserveCompletionValue);
+        _withScopeStack.RemoveAt(_withScopeStack.Count - 1);
+        _currentFunction.PopScope();
+    }
+
+    private void ParseLabeledStatement(bool preserveCompletionValue)
+    {
+        string labelName = _currentToken.Text.ToString();
+
+        foreach (var entry in _breakStack)
+        {
+            if (entry.LabelName == labelName)
+            {
+                throw new JSSyntaxError(
+                    "Duplicate label name",
+                    _currentToken.Start);
+            }
+        }
+
+        NextToken();
+        Expect(TokenType.Colon);
+
+        int labelBreak = NewLabel();
+
+        switch (_currentToken.Type)
+        {
+            case TokenType.For:
+                ParseForStatement(labelName);
+                break;
+            case TokenType.While:
+                ParseWhileStatement(labelName);
+                break;
+            case TokenType.Do:
+                ParseDoWhileStatement(labelName);
+                break;
+            case TokenType.Switch:
+                ParseSwitchStatement(labelName);
+                break;
+            default:
+                PushBreakContext(labelBreak, -1, labelName);
+                ParseStatement(preserveCompletionValue);
+                EmitLabel(labelBreak);
+                PopBreakContext();
+                break;
+        }
+    }
+
+    private struct ForInOfTarget
+    {
+        public bool IsDestructuring;
+        public bool IsLexical;
+        public LhsKind Kind;
+        public JSAtom Atom;
+        public int Index;
+    }
+
+    private void EmitForInOfAssignment(in ForInOfTarget target)
+    {
+        if (target.IsDestructuring)
+        {
+            ApplyDestructuringAssignment(target.IsLexical);
+            return;
+        }
+
+        switch (target.Kind)
+        {
+            case LhsKind.GlobalVar:
+                EmitOp(OpCode.PushThis);
+                EmitOp(OpCode.Swap);
+                EmitOp(OpCode.PutField);
+                EmitAtom(target.Atom);
+                break;
+            case LhsKind.LocalVar:
+                EmitOp(OpCode.SetLoc);
+                EmitU16((ushort)target.Index);
+                break;
+            case LhsKind.Argument:
+                EmitOp(OpCode.SetArg);
+                EmitU16((ushort)target.Index);
+                break;
+            default:
+                EmitOp(OpCode.PutRefValue);
+                break;
+        }
+    }
+
+    private ForInOfTarget ParseForInOfLeftHandSide(bool isAwait, out bool isForOf)
+    {
+        bool isDeclaration = false;
+        bool isLexical = false;
+        bool isConst = false;
+        var target = new ForInOfTarget();
+
+        if (Check(TokenType.Var) || Check(TokenType.Let) || Check(TokenType.Const))
+        {
+            isDeclaration = true;
+            if (Match(TokenType.Var))
+            {
+                isLexical = false;
+            }
+            else if (Match(TokenType.Let))
+            {
+                isLexical = true;
+            }
+            else
+            {
+                Expect(TokenType.Const);
+                isLexical = true;
+                isConst = true;
+            }
+
+            if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+            {
+                ParseDestructuringBindingPattern(JSVarKind.Normal, isLexical, isConst);
+                target.IsDestructuring = true;
+                target.IsLexical = isLexical;
+            }
+            else if (Check(TokenType.Identifier))
+            {
+                var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
+                NextToken();
+
+                int varIdx = _currentFunction.AddVar(atom, JSVarKind.Normal, isConst, isLexical);
+                bool useGlobalProperty = _currentFunction.IsGlobalVar && !isLexical;
+                target.Kind = useGlobalProperty ? LhsKind.GlobalVar : LhsKind.LocalVar;
+                target.Atom = atom;
+                target.Index = varIdx;
+            }
+            else
+            {
+                throw new JSSyntaxError(
+                    $"Expected identifier or destructuring pattern, got {_currentToken.Type}",
+                    _currentToken.Start);
+            }
+        }
+        else if (Check(TokenType.Identifier))
+        {
+            var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
+            NextToken();
+
+            int argIdx = _currentFunction.FindArg(atom);
+            if (argIdx >= 0)
+            {
+                target.Kind = LhsKind.Argument;
+                target.Atom = atom;
+                target.Index = argIdx;
+            }
+            else
+            {
+                int varIdx = _currentFunction.FindVar(atom);
+                if (varIdx >= 0)
+                {
+                    var varDef = _currentFunction.GetVarDef(varIdx);
+                    bool useGlobalProperty = _currentFunction.IsGlobalVar && !varDef.IsLexical;
+                    target.Kind = useGlobalProperty ? LhsKind.GlobalVar : LhsKind.LocalVar;
+                    target.Index = varIdx;
+                }
+                else
+                {
+                    target.Kind = LhsKind.GlobalVar;
+                }
+                target.Atom = atom;
+            }
+        }
+        else if (Check(TokenType.LeftBracket) || Check(TokenType.LeftBrace))
+        {
+            if (isDeclaration)
+            {
+                ParseDestructuringBindingPattern(JSVarKind.Normal, isLexical, isConst);
+                target.IsDestructuring = true;
+                target.IsLexical = isLexical;
+            }
+            else
+            {
+                SkipDestructuringPatternTokens();
+                target.IsDestructuring = true;
+                target.IsLexical = false;
+            }
+        }
+        else
+        {
+            throw new JSSyntaxError(
+                $"Expected identifier or destructuring pattern, got {_currentToken.Type}",
+                _currentToken.Start);
+        }
+
+        if (Match(TokenType.Assign))
+        {
+            throw new JSSyntaxError(
+                "Initializer not allowed in for-in/of declaration",
+                _currentToken.Start);
+        }
+
+        if (Match(TokenType.Comma))
+        {
+            throw new JSSyntaxError(
+                "Only a single binding is allowed in for-in/of",
+                _currentToken.Start);
+        }
+
+        if (Match(TokenType.Of))
+        {
+            isForOf = true;
+        }
+        else if (Match(TokenType.In))
+        {
+            isForOf = false;
+        }
+        else
+        {
+            throw new JSSyntaxError(
+                "Expected 'in' or 'of' in for statement",
+                _currentToken.Start);
+        }
+
+        if (isAwait && !isForOf)
+        {
+            throw new JSSyntaxError(
+                "for await only supports for-of",
+                _currentToken.Start);
+        }
+
+        return target;
+    }
+
+    private void ParseForInOfStatement(bool isAwait, string? labelName)
+    {
+        _currentFunction.PushScope();
+
+        int labelNext = NewLabel();
+        int labelBody = NewLabel();
+        int labelContinue = NewLabel();
+        int labelBreak = NewLabel();
+        int labelExpr = NewLabel();
+
+        EmitGoto(OpCode.Goto, labelExpr);
+        EmitLabel(labelNext);
+
+        var target = ParseForInOfLeftHandSide(isAwait, out bool isForOf);
+        EmitForInOfAssignment(target);
+        EmitGoto(OpCode.Goto, labelBody);
+
+        EmitLabel(labelExpr);
+        if (isForOf)
+        {
+            ParseAssignExpression();
+            EmitOp(isAwait ? OpCode.ForAwaitOfStart : OpCode.ForOfStart);
+        }
+        else
+        {
+            ParseExpression();
+            EmitOp(OpCode.ForInStart);
+        }
+        EmitGoto(OpCode.Goto, labelContinue);
+        Expect(TokenType.RightParen);
+
+        PushBreakContext(labelBreak, labelContinue, labelName);
+        EmitLabel(labelBody);
+        ParseStatement();
+
+        EmitLabel(labelContinue);
+        if (isForOf)
+        {
+            if (isAwait)
+            {
+                EmitOp(OpCode.ForAwaitOfNext);
+                EmitOp(OpCode.Await);
+                EmitOp(OpCode.IteratorGetValueDone);
+            }
+            else
+            {
+                EmitOp(OpCode.ForOfNext);
+                EmitU8(0);
+            }
+        }
+        else
+        {
+            EmitOp(OpCode.ForInNext);
+        }
+        EmitGoto(OpCode.IfFalse, labelNext);
+        EmitOp(OpCode.Drop);
+
+        EmitLabel(labelBreak);
+        if (isForOf)
+        {
+            EmitOp(OpCode.IteratorClose);
+        }
+        else
+        {
+            EmitOp(OpCode.Drop);
+        }
+        PopBreakContext();
+
+        _currentFunction.PopScope();
+    }
+
     /// <summary>
     /// Parses a return statement: return [expr];
     /// </summary>
@@ -3915,15 +4660,32 @@ public sealed class Parser
     {
         Expect(TokenType.Break);
 
-        // TODO: Handle labeled break
-        if (_breakStack.Count == 0)
+        string? labelName = null;
+        if (Check(TokenType.Identifier) && !_currentToken.HasLineTerminatorBefore)
+        {
+            labelName = _currentToken.Text.ToString();
+            NextToken();
+        }
+
+        BreakContext ctx;
+        if (labelName == null)
+        {
+            if (_breakStack.Count == 0)
+            {
+                throw new JSSyntaxError(
+                    "break statement not inside loop or switch",
+                    _currentToken.Start);
+            }
+            ctx = _breakStack.Peek();
+        }
+        else if (!TryFindBreakContext(labelName, requireContinue: false, out ctx))
         {
             throw new JSSyntaxError(
-                "break statement not inside loop or switch",
+                $"Undefined label '{labelName}'",
                 _currentToken.Start);
         }
 
-        EmitGoto(OpCode.Goto, _breakStack.Peek().BreakLabel);
+        EmitGoto(OpCode.Goto, ctx.BreakLabel);
         ExpectSemicolon();
     }
 
@@ -3934,15 +4696,31 @@ public sealed class Parser
     {
         Expect(TokenType.Continue);
 
-        // TODO: Handle labeled continue
-        if (_breakStack.Count == 0)
+        string? labelName = null;
+        if (Check(TokenType.Identifier) && !_currentToken.HasLineTerminatorBefore)
+        {
+            labelName = _currentToken.Text.ToString();
+            NextToken();
+        }
+
+        BreakContext ctx;
+        if (labelName == null)
+        {
+            if (_breakStack.Count == 0)
+            {
+                throw new JSSyntaxError(
+                    "continue statement not inside loop",
+                    _currentToken.Start);
+            }
+            ctx = _breakStack.Peek();
+        }
+        else if (!TryFindBreakContext(labelName, requireContinue: true, out ctx))
         {
             throw new JSSyntaxError(
-                "continue statement not inside loop",
+                $"Undefined label '{labelName}'",
                 _currentToken.Start);
         }
 
-        var ctx = _breakStack.Peek();
         if (ctx.ContinueLabel < 0)
         {
             throw new JSSyntaxError(
@@ -4067,7 +4845,7 @@ public sealed class Parser
     /// <summary>
     /// Parses a switch statement: switch (expr) { case expr: stmts }
     /// </summary>
-    public void ParseSwitchStatement()
+    public void ParseSwitchStatement(string? labelName = null)
     {
         Expect(TokenType.Switch);
         Expect(TokenType.LeftParen);
@@ -4079,7 +4857,7 @@ public sealed class Parser
         int labelDefault = -1;
         var caseLabels = new System.Collections.Generic.List<int>();
 
-        PushBreakContext(labelBreak, -1);  // Switch has break but no continue
+        PushBreakContext(labelBreak, -1, labelName);  // Switch has break but no continue
         _currentFunction.PushScope();
 
         // First pass: collect case expressions and labels
@@ -4232,6 +5010,8 @@ public sealed class Parser
 
         // Save the parent function and create a new function definition
         var parentFunction = _currentFunction;
+        var savedWithScopes = _withScopeStack.ToArray();
+        _withScopeStack.Clear();
         var newFunction = new JSFunctionDef(funcName);
         newFunction.Filename = parentFunction.Filename;
         newFunction.Parent = parentFunction;
@@ -4315,6 +5095,8 @@ public sealed class Parser
 
         // Switch back to the parent function
         _currentFunction = parentFunction;
+        _withScopeStack.Clear();
+        _withScopeStack.AddRange(savedWithScopes);
 
         // Emit code to create the function object (closure)
         EmitOp(OpCode.FClosure);
@@ -4880,22 +5662,43 @@ public sealed class Parser
     {
         public int BreakLabel;
         public int ContinueLabel;
+        public string? LabelName;
 
-        public BreakContext(int breakLabel, int continueLabel)
+        public BreakContext(int breakLabel, int continueLabel, string? labelName)
         {
             BreakLabel = breakLabel;
             ContinueLabel = continueLabel;
+            LabelName = labelName;
         }
     }
 
-    private void PushBreakContext(int breakLabel, int continueLabel)
+    private void PushBreakContext(int breakLabel, int continueLabel, string? labelName = null)
     {
-        _breakStack.Push(new BreakContext(breakLabel, continueLabel));
+        _breakStack.Push(new BreakContext(breakLabel, continueLabel, labelName));
     }
 
     private void PopBreakContext()
     {
         _breakStack.Pop();
+    }
+
+    private bool TryFindBreakContext(string labelName, bool requireContinue, out BreakContext context)
+    {
+        foreach (var entry in _breakStack)
+        {
+            if (entry.LabelName == labelName)
+            {
+                if (!requireContinue || entry.ContinueLabel >= 0)
+                {
+                    context = entry;
+                    return true;
+                }
+                break;
+            }
+        }
+
+        context = default;
+        return false;
     }
 
     #endregion

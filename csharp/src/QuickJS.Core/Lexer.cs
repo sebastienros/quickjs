@@ -1031,6 +1031,68 @@ public sealed class Lexer
         return ScanTemplateLiteral(start, isContinuation: true);
     }
 
+    /// <summary>
+    /// Scans a regular expression literal starting after the leading '/'.
+    /// </summary>
+    public Token ScanRegExpLiteral(SourceLocation start, int startPos, bool hasLineTerminatorBefore)
+    {
+        bool inCharClass = false;
+        bool escaped = false;
+
+        int patternStart = _position;
+        while (!IsAtEnd)
+        {
+            char c = Current;
+            if (c == '\r' || c == '\n')
+            {
+                break;
+            }
+
+            if (!escaped)
+            {
+                if (c == '/' && !inCharClass)
+                {
+                    break;
+                }
+                if (c == '[')
+                {
+                    inCharClass = true;
+                }
+                else if (c == ']' && inCharClass)
+                {
+                    inCharClass = false;
+                }
+            }
+
+            escaped = !escaped && c == '\\';
+            Advance();
+        }
+
+        if (IsAtEnd || Current == '\r' || Current == '\n')
+        {
+            var errorText = GetSlice(startPos, _position - startPos);
+            var errorEnd = CreateLocation();
+            return new Token(TokenType.Error, errorText, start, errorEnd, null, hasLineTerminatorBefore);
+        }
+
+        int patternEnd = _position;
+        Advance(); // consume closing '/'
+
+        int flagsStart = _position;
+        while (!IsAtEnd && IsIdentifierPart(Current))
+        {
+            Advance();
+        }
+        int flagsEnd = _position;
+
+        string pattern = _source.Substring(patternStart, patternEnd - patternStart);
+        string flags = _source.Substring(flagsStart, flagsEnd - flagsStart);
+        var text = GetSlice(startPos, _position - startPos);
+        var end = CreateLocation();
+
+        return new Token(TokenType.RegExp, text, start, end, new RegExpLiteral(pattern, flags), hasLineTerminatorBefore);
+    }
+
     #endregion
 
     #region Punctuators and Operators
