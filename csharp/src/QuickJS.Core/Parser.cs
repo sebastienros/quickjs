@@ -112,6 +112,11 @@ public sealed class Parser
         _currentToken = _lexer.NextToken();
     }
 
+    private void NextTemplateToken()
+    {
+        _currentToken = _lexer.ScanTemplateToken();
+    }
+
     /// <summary>
     /// Returns true if the current token matches the expected type.
     /// </summary>
@@ -1065,6 +1070,11 @@ public sealed class Parser
                     }
                     continue;
                 }
+                if (Check(TokenType.Template))
+                {
+                    ParseTaggedTemplate(hasThisValue: false);
+                    continue;
+                }
             }
 
             if (Match(TokenType.Dot))
@@ -1103,6 +1113,13 @@ public sealed class Parser
                         EmitOp(OpCode.Apply);
                         EmitU16(0);
                     }
+                }
+                else if ((flags & ParseFlags.PostfixCall) != 0 && Check(TokenType.Template))
+                {
+                    EmitOp(OpCode.GetField2);
+                    EmitAtom(atom);
+                    EmitOp(OpCode.Swap);
+                    ParseTaggedTemplate(hasThisValue: true);
                 }
                 else
                 {
@@ -1269,6 +1286,10 @@ public sealed class Parser
                 ParseObjectLiteral();
                 break;
 
+            case TokenType.Template:
+                ParseTemplateLiteral();
+                break;
+
             case TokenType.Function:
                 ParseFunctionExpression();
                 break;
@@ -1297,6 +1318,131 @@ public sealed class Parser
 
             default:
                 throw ReportUnexpectedToken();
+        }
+    }
+
+    private TemplateLiteralToken GetTemplateToken()
+    {
+        if (_currentToken.Type != TokenType.Template ||
+            _currentToken.Value is not TemplateLiteralToken template)
+        {
+            throw ReportUnexpectedToken();
+        }
+        return template;
+    }
+
+    private void EmitTemplateObject(IReadOnlyList<string> cookedParts, IReadOnlyList<string> rawParts)
+    {
+        for (int i = 0; i < cookedParts.Count; i++)
+        {
+            EmitStringLiteral(cookedParts[i]);
+        }
+        EmitOp(OpCode.ArrayFrom);
+        EmitU16((ushort)cookedParts.Count);
+
+        for (int i = 0; i < rawParts.Count; i++)
+        {
+            EmitStringLiteral(rawParts[i]);
+        }
+        EmitOp(OpCode.ArrayFrom);
+        EmitU16((ushort)rawParts.Count);
+
+        EmitOp(OpCode.DefineField);
+        EmitAtom(_atoms.GetOrCreateAtom("raw"));
+    }
+
+    private void ParseTemplateLiteral()
+    {
+        bool hasValue = false;
+
+        while (true)
+        {
+            var part = GetTemplateToken();
+            if (!hasValue && (part.Cooked.Length > 0 || !part.IsTail))
+            {
+                EmitStringLiteral(part.Cooked);
+                hasValue = true;
+            }
+            else if (hasValue && part.Cooked.Length > 0)
+            {
+                EmitStringLiteral(part.Cooked);
+                EmitOp(OpCode.Add);
+            }
+
+            if (part.IsTail)
+                break;
+
+            NextToken(); // enter template expression
+            ParseAssignExpression();
+            if (!hasValue)
+            {
+                EmitStringLiteral(string.Empty);
+                hasValue = true;
+            }
+            EmitOp(OpCode.Add);
+
+            if (!Check(TokenType.RightBrace))
+                throw ReportExpectedToken(TokenType.RightBrace);
+            NextTemplateToken();
+        }
+
+        if (!hasValue)
+        {
+            EmitStringLiteral(string.Empty);
+        }
+
+        NextToken();
+    }
+
+    private void ParseTaggedTemplate(bool hasThisValue)
+    {
+        var cookedParts = new List<string>();
+        var rawParts = new List<string>();
+
+        EmitOp(OpCode.ArrayFrom);
+        EmitU16(0);
+        EmitOp(OpCode.PushI32);
+        EmitI32(1);
+
+        while (true)
+        {
+            var part = GetTemplateToken();
+            cookedParts.Add(part.Cooked);
+            rawParts.Add(part.Raw);
+
+            if (part.IsTail)
+                break;
+
+            NextToken(); // enter template expression
+            ParseAssignExpression();
+            EmitOp(OpCode.DefineArrayEl);
+
+            if (!Check(TokenType.RightBrace))
+                throw ReportExpectedToken(TokenType.RightBrace);
+            NextTemplateToken();
+        }
+
+        NextToken(); // consume tail
+
+        EmitOp(OpCode.Drop); // drop nextIndex
+
+        EmitOp(OpCode.PushI32);
+        EmitI32(0);
+        EmitTemplateObject(cookedParts, rawParts);
+        EmitOp(OpCode.DefineArrayEl);
+        EmitOp(OpCode.Drop);
+
+        if (hasThisValue)
+        {
+            EmitOp(OpCode.Apply);
+            EmitU16(0);
+        }
+        else
+        {
+            EmitOp(OpCode.Undefined);
+            EmitOp(OpCode.Swap);
+            EmitOp(OpCode.Apply);
+            EmitU16(0);
         }
     }
 
@@ -2696,6 +2842,13 @@ public sealed class Parser
     private void EmitStringLiteral()
     {
         var value = (string)_currentToken.Value!;
+        int idx = _currentFunction.Constants.AddString(value);
+        EmitOp(OpCode.PushConst);
+        EmitU32((uint)idx);
+    }
+
+    private void EmitStringLiteral(string value)
+    {
         int idx = _currentFunction.Constants.AddString(value);
         EmitOp(OpCode.PushConst);
         EmitU32((uint)idx);

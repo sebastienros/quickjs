@@ -163,6 +163,56 @@ public class EvalTests
         }
     }
 
+    [Fact]
+    public void TemplateLiteral_WithExpressions_Works()
+    {
+        var result = _context.Evaluate("`a${1}b${2}`");
+        Assert.False(_context.HasException, _context.HasException ? GetExceptionMessage() : "");
+        Assert.True(result.IsString);
+        Assert.Equal("a1b2", result.ToString());
+
+        string GetExceptionMessage()
+        {
+            var exVal = _context.GetAndClearException();
+            if (exVal.IsObject)
+            {
+                var exObj = exVal.AsObject();
+                var msgVal = exObj.Get("message");
+                return msgVal.IsString ? msgVal.ToString()! : exVal.ToString()!;
+            }
+            return exVal.ToString()!;
+        }
+    }
+
+    [Fact]
+    public void TaggedTemplate_ReceivesCookedAndRaw()
+    {
+        var result = _context.Evaluate(@"
+            function tag(strings, value) {
+                return [strings[0], strings.raw[0], value];
+            }
+            tag`a\n${1}`;
+        ");
+        Assert.False(_context.HasException, _context.HasException ? GetExceptionMessage() : "");
+        Assert.True(result.IsObject);
+        var array = result.AsObject();
+        Assert.Equal("a\n", array.Get(0).ToString());
+        Assert.Equal("a\\n", array.Get(1).ToString());
+        Assert.Equal(1, array.Get(2).ToInt32());
+
+        string GetExceptionMessage()
+        {
+            var exVal = _context.GetAndClearException();
+            if (exVal.IsObject)
+            {
+                var exObj = exVal.AsObject();
+                var msgVal = exObj.Get("message");
+                return msgVal.IsString ? msgVal.ToString()! : exVal.ToString()!;
+            }
+            return exVal.ToString()!;
+        }
+    }
+
     #endregion
 
     #region Function Constructor Tests
@@ -519,4 +569,3 @@ public class EvalTests
 
     #endregion
 }
-

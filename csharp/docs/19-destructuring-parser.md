@@ -356,7 +356,7 @@ git tag step-4.7-destructuring-parser
 
 ## Next Steps
 
-Step 4.8 will implement the **Template Literal Parser** for tagged templates and template strings:
+Step 4.8 implemented the **Template Literal Parser** for tagged templates and template strings:
 - Basic template literals: `` `Hello ${name}` ``
 - Tagged templates: `` tag`string ${expr}` ``
 - Nested templates

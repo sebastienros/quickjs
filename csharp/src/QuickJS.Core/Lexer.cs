@@ -190,7 +190,7 @@ public sealed class Lexer
         // Template literals
         if (c == '`')
         {
-            return ScanTemplateLiteral(start);
+            return ScanTemplateLiteral(start, isContinuation: false);
         }
 
         // Private name
@@ -955,12 +955,17 @@ public sealed class Lexer
 
     #region Template Literals
 
-    private Token ScanTemplateLiteral(SourceLocation start)
+    private Token ScanTemplateLiteral(SourceLocation start, bool isContinuation)
     {
         int startPos = _position;
-        var sb = new StringBuilder();
-        
-        Advance(); // Opening backtick
+        var cooked = new StringBuilder();
+        var raw = new StringBuilder();
+        bool isTail = false;
+
+        if (!isContinuation)
+        {
+            Advance(); // Opening backtick
+        }
 
         while (!IsAtEnd)
         {
@@ -968,45 +973,62 @@ public sealed class Lexer
 
             if (c == '`')
             {
+                isTail = true;
                 Advance();
                 break;
             }
 
             if (c == '$' && Peek(1) == '{')
             {
-                // Template expression - for now just consume it
-                // TODO: Handle template expressions properly
-                sb.Append(c);
                 Advance();
+                Advance();
+                break;
             }
-            else if (c == '\\')
+
+            if (c == '\\')
             {
+                int escapeStart = _position;
+                Advance(); // backslash
+                if (IsAtEnd)
+                    break;
+                cooked.Append(ScanEscapeSequence());
+                raw.Append(_source, escapeStart, _position - escapeStart);
+            }
+            else if (c == '\r')
+            {
+                cooked.Append('\n');
+                raw.Append('\n');
                 Advance();
-                if (!IsAtEnd)
-                {
-                    sb.Append(ScanEscapeSequence());
-                }
+                Match('\n');
+            }
+            else if (c == '\n')
+            {
+                cooked.Append('\n');
+                raw.Append('\n');
+                Advance();
             }
             else
             {
-                if (c == '\r')
-                {
-                    sb.Append('\n');
-                    Advance();
-                    Match('\n');
-                }
-                else
-                {
-                    sb.Append(c);
-                    Advance();
-                }
+                cooked.Append(c);
+                raw.Append(c);
+                Advance();
             }
         }
 
         var text = GetSlice(startPos, _position - startPos);
         var end = CreateLocation();
 
-        return new Token(TokenType.Template, text, start, end, sb.ToString(), _hasLineTerminatorBefore);
+        var rawText = raw.ToString()
+            .Replace("\r\n", "\n")
+            .Replace("\r", "\n");
+        var value = new TemplateLiteralToken(cooked.ToString(), rawText, isTail);
+        return new Token(TokenType.Template, text, start, end, value, _hasLineTerminatorBefore);
+    }
+
+    internal Token ScanTemplateToken()
+    {
+        var start = CreateLocation();
+        return ScanTemplateLiteral(start, isContinuation: true);
     }
 
     #endregion

@@ -310,7 +310,7 @@ export const x = 1;
 
 ## What's Next
 
-Step 4.7 will implement the **Template Literal Parser** for tagged templates and template expressions:
+Step 4.7 implemented the **Template Literal Parser** for tagged templates and template expressions:
 
 ```javascript
 const str = `Hello, ${name}!`;

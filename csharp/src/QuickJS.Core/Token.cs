@@ -169,6 +169,43 @@ public readonly struct Token
 }
 
 /// <summary>
+/// Represents a template literal chunk produced by the lexer.
+/// </summary>
+/// <remarks>
+/// The raw value preserves escapes, while cooked applies escape processing.
+/// </remarks>
+public readonly struct TemplateLiteralToken
+{
+    /// <summary>
+    /// Gets the cooked template text with escape sequences processed.
+    /// </summary>
+    public string Cooked { get; }
+
+    /// <summary>
+    /// Gets the raw template text with escape sequences preserved.
+    /// </summary>
+    public string Raw { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether this chunk is the tail (ends with `).
+    /// </summary>
+    public bool IsTail { get; }
+
+    /// <summary>
+    /// Creates a new template literal chunk.
+    /// </summary>
+    /// <param name="cooked">The cooked text.</param>
+    /// <param name="raw">The raw text.</param>
+    /// <param name="isTail">True if this is the tail chunk.</param>
+    public TemplateLiteralToken(string cooked, string raw, bool isTail)
+    {
+        Cooked = cooked;
+        Raw = raw;
+        IsTail = isTail;
+    }
+}
+
+/// <summary>
 /// Provides extension methods for <see cref="TokenType"/>.
 /// </summary>
 public static class TokenTypeExtensions

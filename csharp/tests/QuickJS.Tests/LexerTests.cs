@@ -366,7 +366,8 @@ public class LexerTests
         var lexer = new Lexer("`hello world`");
         var token = lexer.NextToken();
         Assert.Equal(TokenType.Template, token.Type);
-        Assert.Equal("hello world", token.GetStringValue());
+        var template = Assert.IsType<TemplateLiteralToken>(token.Value);
+        Assert.Equal("hello world", template.Cooked);
     }
 
     [Fact]
@@ -375,7 +376,8 @@ public class LexerTests
         var lexer = new Lexer("`line1\nline2`");
         var token = lexer.NextToken();
         Assert.Equal(TokenType.Template, token.Type);
-        Assert.Equal("line1\nline2", token.GetStringValue());
+        var template = Assert.IsType<TemplateLiteralToken>(token.Value);
+        Assert.Equal("line1\nline2", template.Cooked);
     }
 
     #endregion
