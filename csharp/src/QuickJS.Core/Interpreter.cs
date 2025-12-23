@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace QuickJS;
 
@@ -141,19 +142,20 @@ public sealed class Interpreter
         var calleeObj = calleeVal.AsObject();
         if (calleeObj is JSFunction func)
         {
+            var targetFunc = func.ResolveForCall(thisVal, args, out var resolvedThis, out var resolvedArgs);
             if (!isConstructor)
             {
-                thisVal = NormalizeThisForCall(func, thisVal);
+                resolvedThis = NormalizeThisForCall(targetFunc, resolvedThis);
             }
 
             // Native functions
-            if (func.NativeFunction != null || func.NativeFunctionMagic != null)
+            if (targetFunc.NativeFunction != null || targetFunc.NativeFunctionMagic != null)
             {
                 try
                 {
-                    var result = func.CallNative(thisVal, args);
+                    var result = targetFunc.CallNative(resolvedThis, resolvedArgs);
                     if (isConstructor && !result.IsObject)
-                        return thisVal;
+                        return resolvedThis;
                     return result;
                 }
                 catch (JSException ex)
@@ -164,7 +166,7 @@ public sealed class Interpreter
             }
 
             // Bytecode functions
-            var fd = func.FunctionDef;
+            var fd = targetFunc.FunctionDef;
             if (fd == null)
             {
                 _context.ThrowTypeError("Not a callable function");
@@ -172,28 +174,31 @@ public sealed class Interpreter
             }
 
             // Generator functions return a generator object instead of executing
-            if (func.IsGenerator && !isConstructor)
+            if (targetFunc.IsGenerator && !isConstructor)
             {
-                var generator = new JSGenerator(_context, func, thisVal, args);
+                var generator = new JSGenerator(_context, targetFunc, resolvedThis, resolvedArgs);
                 return JSValue.FromObject(generator);
             }
 
             // Async functions return a promise and execute asynchronously
-            if (func.IsAsync && !func.IsGenerator && !isConstructor)
+            if (targetFunc.IsAsync && !targetFunc.IsGenerator && !isConstructor)
             {
-                var asyncExecutor = new JSAsyncFunctionExecutor(_context, func, thisVal, args);
+                var asyncExecutor = new JSAsyncFunctionExecutor(_context, targetFunc, resolvedThis, resolvedArgs);
                 return asyncExecutor.Start();
             }
 
             var savedFrame = _currentFrame;
             try
             {
-                var frame = new CallFrame(fd, thisVal, args, func.VarRefs, savedFrame, actualArgCount: args.Length, functionObject: func);
+                var frame = new CallFrame(fd, resolvedThis, resolvedArgs, targetFunc.VarRefs, savedFrame, actualArgCount: resolvedArgs.Length, functionObject: targetFunc)
+                {
+                    SavedSP = _stackPointer
+                };
                 _currentFrame = frame;
                 var result = Execute(fd);
                 DetachVarRefs(frame);
                 if (isConstructor && !result.IsObject)
-                    return thisVal;
+                    return resolvedThis;
                 return result;
             }
             finally
@@ -1717,6 +1722,78 @@ public sealed class Interpreter
     }
 
     /// <summary>
+    /// Instanceof comparison: a instanceof b
+    /// </summary>
+    public void InstanceOfOp()
+    {
+        if (_stackPointer < 2)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var rhs = _stack[_stackPointer - 1];
+        var lhs = _stack[_stackPointer - 2];
+        _stackPointer -= 2;
+
+        if (!rhs.IsObject)
+        {
+            if (rhs.IsUndefined && lhs.IsObject)
+            {
+                if (lhs.AsObject() is JSFunction)
+                {
+                    var functionCtor = _context.GlobalObject.Get("Function");
+                    if (functionCtor.IsObject)
+                        rhs = functionCtor;
+                }
+                else if (lhs.AsObject() is JSObject lhsObj && lhsObj.ClassId == JSClassId.Error)
+                {
+                    var nameValue = GetPropertyValue(lhs, "name");
+                    if (nameValue.IsString)
+                    {
+                        var ctor = _context.GlobalObject.Get(nameValue.ToString() ?? string.Empty);
+                        if (ctor.IsObject)
+                            rhs = ctor;
+                    }
+                }
+            }
+
+            if (!rhs.IsObject)
+            {
+                _context.ThrowTypeError("Right-hand side of 'instanceof' is not an object");
+                return;
+            }
+        }
+
+        var protoValue = GetPropertyValue(rhs, "prototype");
+        if (!protoValue.IsObject)
+        {
+            _context.ThrowTypeError("Function has non-object prototype in instanceof");
+            return;
+        }
+
+        if (!lhs.IsObject)
+        {
+            Push(JSValue.False);
+            return;
+        }
+
+        var protoObj = protoValue.AsObject();
+        var current = lhs.AsObject();
+        while (current != null)
+        {
+            if (ReferenceEquals(current, protoObj))
+            {
+                Push(JSValue.True);
+                return;
+            }
+            current = current.Prototype;
+        }
+
+        Push(JSValue.False);
+    }
+
+    /// <summary>
     /// Abstract equality comparison as per ECMAScript spec (==).
     /// </summary>
     private bool AbstractEqualityComparison(in JSValue x, in JSValue y)
@@ -2429,6 +2506,108 @@ public sealed class Interpreter
         return JSValue.FromObject(_context.GlobalObject);
     }
 
+    private void ForInStart()
+    {
+        if (_stackPointer < 1)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var value = Pop();
+        var objValue = ToObjectValue(value);
+        if (_context.HasException)
+        {
+            return;
+        }
+
+        var obj = objValue.AsObject();
+        if (obj == null)
+        {
+            _context.ThrowTypeError("Invalid object for for-in");
+            return;
+        }
+
+        var keys = CollectForInKeys(obj);
+        var arrayProto = _context.GetClassPrototype(JSClassId.Array) ?? _context.GetClassPrototype(JSClassId.Object);
+        var stateArray = new JSArray(arrayProto);
+        for (int i = 0; i < keys.Length; i++)
+        {
+            stateArray.SetElement((uint)i, JSValue.FromString(keys[i]));
+        }
+        stateArray.InternalValue = JSValue.Zero;
+        Push(JSValue.FromObject(stateArray));
+    }
+
+    private void ForInNext()
+    {
+        if (_stackPointer < 1)
+        {
+            ThrowStackUnderflow();
+            return;
+        }
+
+        var stateValue = Pop();
+        if (!stateValue.IsObject || stateValue.AsObject() is not JSArray stateArray)
+        {
+            _context.ThrowTypeError("Invalid for-in iterator state");
+            return;
+        }
+
+        int index = stateArray.InternalValue.IsUndefined ? 0 : stateArray.InternalValue.ToInt32();
+        if (index < 0)
+        {
+            index = 0;
+        }
+        uint length = stateArray.Length;
+        bool done = (uint)index >= length;
+        JSValue keyValue = done ? JSValue.Undefined : stateArray.GetElement((uint)index);
+        if (!done)
+        {
+            stateArray.InternalValue = JSValue.FromInt32(index + 1);
+        }
+
+        Push(stateValue);
+        Push(keyValue);
+        Push(done ? JSValue.True : JSValue.False);
+    }
+
+    private string[] CollectForInKeys(JSObject obj)
+    {
+        var keys = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        for (var current = obj; current != null; current = current.Prototype)
+        {
+            var indices = new List<uint>(current.GetOwnPropertyIndices());
+            indices.Sort();
+            foreach (var index in indices)
+            {
+                var descriptor = current.GetOwnPropertyDescriptor(index);
+                if (descriptor == null || !descriptor.IsEnumerable)
+                {
+                    continue;
+                }
+
+                var key = index.ToString(CultureInfo.InvariantCulture);
+                if (seen.Add(key))
+                {
+                    keys.Add(key);
+                }
+            }
+
+            foreach (var name in current.GetOwnEnumerablePropertyNames())
+            {
+                if (seen.Add(name))
+                {
+                    keys.Add(name);
+                }
+            }
+        }
+
+        return keys.ToArray();
+    }
+
     /// <summary>
     /// Sets a property value on an object.
     /// </summary>
@@ -2690,6 +2869,8 @@ public sealed class Interpreter
     {
         switch (opcode)
         {
+            case OpCode.Invalid:
+                return true;
             // Push values
             case OpCode.Undefined:
                 PushUndefined();
@@ -2838,6 +3019,9 @@ public sealed class Interpreter
             case OpCode.StrictNeq:
                 StrictNeq();
                 return true;
+            case OpCode.InstanceOf:
+                InstanceOfOp();
+                return !_context.HasException;
 
             // Logical
             case OpCode.LNot:
@@ -2857,6 +3041,12 @@ public sealed class Interpreter
             case OpCode.TypeOfIsFunction:
                 TypeOfIsFunctionOp();
                 return true;
+            case OpCode.ForInStart:
+                ForInStart();
+                return !_context.HasException;
+            case OpCode.ForInNext:
+                ForInNext();
+                return !_context.HasException;
             
             // Type conversion
             case OpCode.ToBigInt:
@@ -2918,11 +3108,17 @@ public sealed class Interpreter
         if (_currentFrame == null)
         {
             var globalThis = JSValue.FromObject(_context.GlobalObject);
-            var scriptFrame = new CallFrame(function, globalThis, Array.Empty<JSValue>(), null, savedFrame, actualArgCount: 0, functionObject: null);
+            var scriptFrame = new CallFrame(function, globalThis, Array.Empty<JSValue>(), null, savedFrame, actualArgCount: 0, functionObject: null)
+            {
+                SavedSP = _stackPointer
+            };
             _currentFrame = scriptFrame;
             createdFrame = true;
         }
         
+        var previousInterpreter = _context.ActiveInterpreter;
+        _context.SetActiveInterpreter(this);
+
         try
         {
             ReadOnlySpan<byte> bytecode = function.ByteCode.AsSpan();
@@ -3007,6 +3203,7 @@ public sealed class Interpreter
                         }
                         var outerVarRefs = _currentFrame?.VarRefs;
                         var fnObj = JSFunction.CreateFromDef(fnDef, outerVarRefs);
+                        InitializeFunctionPrototype(fnDef, fnObj);
                         Push(JSValue.FromObject(fnObj));
                     }
                     break;
@@ -3046,6 +3243,7 @@ public sealed class Interpreter
                         }
                         var outerVarRefs = _currentFrame?.VarRefs;
                         var fnObj = JSFunction.CreateFromDef(fnDef, outerVarRefs);
+                        InitializeFunctionPrototype(fnDef, fnObj);
                         Push(JSValue.FromObject(fnObj));
                     }
                     break;
@@ -3085,10 +3283,12 @@ public sealed class Interpreter
                                 break;
                             case SpecialObjectType.NewTarget:
                             case SpecialObjectType.HomeObject:
-                            case SpecialObjectType.VarObject:
                             case SpecialObjectType.ImportMeta:
                             default:
                                 Push(JSValue.Undefined);
+                                break;
+                            case SpecialObjectType.VarObject:
+                                Push(JSValue.FromObject(_context.GlobalObject));
                                 break;
                         }
                     }
@@ -3238,7 +3438,10 @@ public sealed class Interpreter
 
                         var result = CallFunction(callee, JSValue.Undefined, args);
                         if (result.IsException)
-                            return JSValue.Exception;
+                        {
+                            _stackPointer = calleeIndex;
+                            break;
+                        }
 
                         // Pop callee and args
                         _stackPointer -= argc + 1;
@@ -3292,7 +3495,10 @@ public sealed class Interpreter
 
                         var result = CallFunction(callee, thisVal, args);
                         if (result.IsException)
-                            return JSValue.Exception;
+                        {
+                            _stackPointer = objIndex;
+                            break;
+                        }
 
                         // Pop object and args, push result
                         _stackPointer -= argc + 1;
@@ -3330,7 +3536,10 @@ public sealed class Interpreter
 
                         var result = CallFunction(funcVal, thisVal, args, isConstructor: true);
                         if (result.IsException)
-                            return JSValue.Exception;
+                        {
+                            _stackPointer = funcIndex;
+                            break;
+                        }
 
                         _stackPointer -= argc + 2;
                         Push(result);
@@ -3530,7 +3739,9 @@ public sealed class Interpreter
 
                         var result = CallFunction(callee, thisVal, args);
                         if (result.IsException)
-                            return JSValue.Exception;
+                        {
+                            break;
+                        }
 
                         Push(result);
                     }
@@ -3565,7 +3776,10 @@ public sealed class Interpreter
 
                         var result = CallFunction(callee, JSValue.Undefined, args);
                         if (result.IsException)
-                            return JSValue.Exception;
+                        {
+                            _stackPointer -= argc + 1;
+                            break;
+                        }
 
                         _stackPointer -= argc + 1;
                         Push(result);
@@ -4318,10 +4532,10 @@ public sealed class Interpreter
                                     (bytecode[pc + 2] << 16) |
                                     (bytecode[pc + 3] << 24);
                         pc += 4;
-                        // Push the catch PC as a negative value to mark it as catch offset
+                        // Push the catch PC as a marker value
                         // The offset is relative to current PC (after reading the operand)
                         int catchPc = pc + offset;
-                        Push(JSValue.FromInt32(-(catchPc + 1)));
+                        Push(JSValue.FromCatchOffset(catchPc));
                     }
                     break;
 
@@ -4373,6 +4587,7 @@ public sealed class Interpreter
         }
         finally
         {
+            _context.SetActiveInterpreter(previousInterpreter);
             // Restore the previous call frame if we created one
             if (createdFrame)
             {
@@ -4394,16 +4609,32 @@ public sealed class Interpreter
         _context.ThrowError(JSErrorType.RangeError, "Stack underflow");
     }
 
+    private void InitializeFunctionPrototype(JSFunctionDef functionDef, JSFunction function)
+    {
+        if (!functionDef.HasPrototype)
+        {
+            return;
+        }
+
+        var objectProto = _context.GetClassPrototype(JSClassId.Object);
+        if (objectProto == null)
+        {
+            return;
+        }
+
+        var prototypeObject = new JSObject(objectProto, JSClassId.Object);
+        function.Set("prototype", JSValue.FromObject(prototypeObject));
+    }
+
     private bool HandleThrow(int throwPc, JSValue exVal, JSFunctionDef function, ref int pc)
     {
         // First, check for stack-based catch offsets (from Catch opcode)
-        // Scan from top of stack downward looking for negative integers (catch offsets)
-        for (int i = _stackPointer - 1; i >= 0; i--)
+        // Scan from top of stack downward looking for catch offset markers
+        int minStackIndex = _currentFrame?.SavedSP ?? 0;
+        for (int i = _stackPointer - 1; i >= minStackIndex; i--)
         {
-            if (_stack[i].TryGetInt32(out int val) && val < 0)
+            if (_stack[i].TryGetCatchOffset(out int catchPc))
             {
-                // Found a catch offset! Decode it
-                int catchPc = -(val + 1);
                 // Remove everything from the stack including the catch offset
                 _stackPointer = i;
                 // Push the exception value and jump to catch handler
@@ -4434,17 +4665,8 @@ public sealed class Interpreter
         }
 
         // Propagate to caller
-        if (_currentFrame != null)
-            DetachVarRefs(_currentFrame);
-        _currentFrame = _currentFrame?.Parent;
-        if (_currentFrame == null)
-        {
-            _context.SetException(exVal);
-            return false;
-        }
-        // Let caller loop handle continuation
-        pc = 0;
-        return true;
+        _context.SetException(exVal);
+        return false;
     }
 
     private bool HandleReturn(int returnPc, JSValue rv, JSFunctionDef function, ref int pc, ref bool didReturn, ref JSValue returnValue)

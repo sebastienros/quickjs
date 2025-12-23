@@ -15,5 +15,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/QuickJS.Tests/QuickJS.Tests.csproj" />
+    <Project Path="tests/QuickJS.Test262/QuickJS.Test262.csproj" />
   </Folder>
 </Solution>

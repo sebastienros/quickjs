@@ -282,6 +282,12 @@ public readonly struct JSValue : IEquatable<JSValue>
         return new JSValue(JSValueType.Object, obj);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static JSValue FromCatchOffset(int offset)
+    {
+        return new JSValue(JSValueType.CatchOffset, offset);
+    }
+
     /// <summary>
     /// Creates a JavaScript symbol value.
     /// </summary>
@@ -427,6 +433,15 @@ public readonly struct JSValue : IEquatable<JSValue>
     }
 
     /// <summary>
+    /// Returns <c>true</c> if this value is a catch offset marker.
+    /// </summary>
+    public bool IsCatchOffset
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _tag == JSValueType.CatchOffset;
+    }
+
+    /// <summary>
     /// Returns <c>true</c> if this value is a symbol.
     /// </summary>
     public bool IsSymbol
@@ -529,6 +544,18 @@ public readonly struct JSValue : IEquatable<JSValue>
         }
 
         result = 0;
+        return false;
+    }
+
+    internal bool TryGetCatchOffset(out int offset)
+    {
+        if (_tag == JSValueType.CatchOffset)
+        {
+            offset = (int)_int64Value;
+            return true;
+        }
+
+        offset = 0;
         return false;
     }
 

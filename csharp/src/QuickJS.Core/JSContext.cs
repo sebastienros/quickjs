@@ -112,6 +112,7 @@ public sealed class JSContext : IDisposable
 
     // Cached interpreter for reuse (avoids allocating 8KB stack per evaluation)
     private Interpreter? _cachedInterpreter;
+    private Interpreter? _activeInterpreter;
 
     #endregion
 
@@ -725,6 +726,7 @@ public sealed class JSContext : IDisposable
 
         // Set up global object prototype chain
         _globalObject.SetPrototype(objectPrototype);
+        _globalObject.Set("globalThis", JSValue.FromObject(_globalObject));
     }
 
     /// <summary>
@@ -1191,8 +1193,79 @@ public sealed class JSContext : IDisposable
         var functionCtorFunc = new JSFunction(FunctionCtor, "Function", 1, functionProto);
         functionCtorFunc.Set("prototype", JSValue.FromObject(functionProto));
 
+        JSValue FunctionBind(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSFunction target)
+            {
+                return ThrowTypeError("Function.prototype.bind called on non-function");
+            }
+
+            var thisArg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var boundArgs = args.Length > 1 ? args.Skip(1).ToArray() : Array.Empty<JSValue>();
+            var bound = target.Bind(thisArg, boundArgs);
+            return JSValue.FromObject(bound);
+        }
+
+        JSValue FunctionCall(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSFunction target)
+            {
+                return ThrowTypeError("Function.prototype.call called on non-function");
+            }
+
+            var thisArg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var callArgs = args.Length > 1 ? args.Skip(1).ToArray() : Array.Empty<JSValue>();
+            var interpreter = GetInterpreter();
+            return interpreter.CallFunction(JSValue.FromObject(target), thisArg, callArgs);
+        }
+
+        JSValue FunctionApply(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSFunction target)
+            {
+                return ThrowTypeError("Function.prototype.apply called on non-function");
+            }
+
+            var thisArg = args.Length > 0 ? args[0] : JSValue.Undefined;
+            var argArray = args.Length > 1 ? args[1] : JSValue.Undefined;
+
+            JSValue[] callArgs;
+            if (argArray.IsNull || argArray.IsUndefined)
+            {
+                callArgs = Array.Empty<JSValue>();
+            }
+            else if (argArray.IsObject)
+            {
+                var argsObj = argArray.AsObject()!;
+                uint len = argsObj.ClassId == JSClassId.Array
+                    ? argsObj.ArrayLength
+                    : JSValueConversion.ToUInt32(argsObj.Get("length"));
+
+                if (len > int.MaxValue)
+                {
+                    return ThrowRangeError("Too many arguments");
+                }
+
+                callArgs = new JSValue[(int)len];
+                for (uint i = 0; i < len; i++)
+                {
+                    callArgs[(int)i] = argsObj.Get(i);
+                }
+            }
+            else
+            {
+                return ThrowTypeError("Function.prototype.apply requires an array-like object");
+            }
+
+            var interpreter = GetInterpreter();
+            return interpreter.CallFunction(JSValue.FromObject(target), thisArg, callArgs);
+        }
+
         // Function.prototype.constructor = Function
         functionProto.Set("constructor", JSValue.FromObject(functionCtorFunc));
+        functionProto.Set("bind", JSValue.FromObject(new JSFunction(FunctionBind, "bind", 1, functionProto)));
+        functionProto.Set("call", JSValue.FromObject(new JSFunction(FunctionCall, "call", 1, functionProto)));
+        functionProto.Set("apply", JSValue.FromObject(new JSFunction(FunctionApply, "apply", 2, functionProto)));
 
         // Attach global Function
         _globalObject.Set("Function", JSValue.FromObject(functionCtorFunc));
@@ -2293,12 +2366,66 @@ public sealed class JSContext : IDisposable
             var result = new JSObject(arrayProto, JSClassId.Array);
             if (!arrayLike.IsObject)
                 return JSValue.FromObject(result);
-            
+
             var obj = arrayLike.AsObject();
+            var iteratorKey = JSValueConversion.ToString(JSValue.FromSymbol(JSSymbol.Iterator));
+            var iteratorMethod = obj.Get(iteratorKey);
+            if (!iteratorMethod.IsUndefined && !iteratorMethod.IsNull)
+            {
+                if (!iteratorMethod.IsObject || iteratorMethod.AsObject() is not JSFunction iteratorFn)
+                    return ThrowTypeError("Not a function");
+
+                JSValue iterator;
+                try
+                {
+                    iterator = iteratorFn.CallNative(arrayLike, Array.Empty<JSValue>());
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return ThrowTypeError(ex.Message);
+                }
+
+                if (!iterator.IsObject)
+                    return ThrowTypeError("Iterator result is not object");
+
+                var iteratorObj = iterator.AsObject();
+                var nextMethod = iteratorObj.Get("next");
+                if (!nextMethod.IsObject || nextMethod.AsObject() is not JSFunction nextFn)
+                    return ThrowTypeError("Not a function");
+
+                for (int i = 0; ; i++)
+                {
+                    JSValue step;
+                    try
+                    {
+                        step = nextFn.CallNative(iterator, Array.Empty<JSValue>());
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        return ThrowTypeError(ex.Message);
+                    }
+
+                    if (!step.IsObject)
+                        return ThrowTypeError("Iterator result is not object");
+
+                    var stepObj = step.AsObject();
+                    var done = JSValueConversion.ToBoolean(stepObj.Get("done"));
+                    if (done)
+                        break;
+
+                    var val = stepObj.Get("value");
+                    if (mapFn != null)
+                        val = mapFn.CallNative(thisArg, new[] { val, JSValue.FromInt32(i) });
+                    result.Set((uint)i, val);
+                }
+
+                return JSValue.FromObject(result);
+            }
+
             var lengthVal = obj.Get("length");
             if (!lengthVal.IsNumber)
                 return JSValue.FromObject(result);
-            
+
             var len = lengthVal.ToInt32();
             for (int i = 0; i < len; i++)
             {
@@ -4243,6 +4370,8 @@ public sealed class JSContext : IDisposable
 
         var dateCtor = new JSFunction(DateCtor, "Date", 7, functionProto);
         dateCtor.SetPrototype(functionProto);
+        dateCtor.Set("prototype", JSValue.FromObject(dateProto));
+        dateProto.Set("constructor", JSValue.FromObject(dateCtor));
 
         // Date.now()
         JSValue DateNow(JSValue thisVal, JSValue[] args)
@@ -4283,6 +4412,15 @@ public sealed class JSContext : IDisposable
             if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
                 return ThrowTypeError("Date.prototype.getFullYear called on non-Date");
             return date.IsInvalid ? JSValue.FromDouble(double.NaN) : JSValue.FromInt32(date.GetFullYear());
+        }
+
+        JSValue GetYear(JSValue thisVal, JSValue[] args)
+        {
+            if (!thisVal.IsObject || thisVal.AsObject() is not JSDate date)
+                return ThrowTypeError("Date.prototype.getYear called on non-Date");
+            if (date.IsInvalid)
+                return JSValue.FromDouble(double.NaN);
+            return JSValue.FromInt32(date.GetFullYear() - 1900);
         }
 
         JSValue GetMonth(JSValue thisVal, JSValue[] args)
@@ -4623,6 +4761,7 @@ public sealed class JSContext : IDisposable
 
         // Register prototype methods - Getters (local)
         dateProto.Set("getFullYear", JSValue.FromObject(new JSFunction(GetFullYear, "getFullYear", 0, functionProto)));
+        dateProto.Set("getYear", JSValue.FromObject(new JSFunction(GetYear, "getYear", 0, functionProto)));
         dateProto.Set("getMonth", JSValue.FromObject(new JSFunction(GetMonth, "getMonth", 0, functionProto)));
         dateProto.Set("getDate", JSValue.FromObject(new JSFunction(GetDate, "getDate", 0, functionProto)));
         dateProto.Set("getDay", JSValue.FromObject(new JSFunction(GetDay, "getDay", 0, functionProto)));
@@ -5499,6 +5638,11 @@ public sealed class JSContext : IDisposable
     /// </remarks>
     internal Interpreter GetInterpreter()
     {
+        if (_activeInterpreter != null)
+        {
+            return _activeInterpreter;
+        }
+
         if (_cachedInterpreter == null)
         {
             _cachedInterpreter = new Interpreter(this);
@@ -5508,6 +5652,13 @@ public sealed class JSContext : IDisposable
             _cachedInterpreter.Reset();
         }
         return _cachedInterpreter;
+    }
+
+    internal Interpreter? ActiveInterpreter => _activeInterpreter;
+
+    internal void SetActiveInterpreter(Interpreter? interpreter)
+    {
+        _activeInterpreter = interpreter;
     }
 
     private void ThrowIfDisposed()

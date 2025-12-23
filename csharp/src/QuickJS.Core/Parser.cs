@@ -61,6 +61,7 @@ public sealed class Parser
     private int _lastLhsIndex = -1;
     private int _lastLhsBytecodePos = -1;  // Position before LHS bytecode
     private bool _lastLhsWithScope = false;
+    private bool _lastLhsIsComputed = false;
     private const string WithScopeVarName = "__with__";
 
     /// <summary>
@@ -621,6 +622,8 @@ public sealed class Parser
             _lastLhsKind = LhsKind.None;
             var lhsWithScope = _lastLhsWithScope;
             _lastLhsWithScope = false;
+            var lhsIsComputed = _lastLhsIsComputed;
+            _lastLhsIsComputed = false;
             
             NextToken(); // consume the assignment operator
 
@@ -648,7 +651,7 @@ public sealed class Parser
                         // Truncate bytecode to before the GetField, emit PushThis + value + PutField
                         EmitOp(OpCode.Swap);  // new_value old_value
                         EmitOp(OpCode.Drop);  // new_value
-                        EmitOp(OpCode.PushThis);
+                        EmitGlobalObject();
                         EmitOp(OpCode.Swap);  // this new_value
                         EmitOp(OpCode.PutField);
                         EmitAtom(lhsAtom);
@@ -696,13 +699,13 @@ public sealed class Parser
                 {
                     case LhsKind.GlobalVar:
                         // Stack: value. Need: this value
-                        EmitOp(OpCode.PushThis);
+                        EmitGlobalObject();
                         EmitOp(OpCode.Swap);  // this value
                         EmitOp(OpCode.PutField);
                         EmitAtom(lhsAtom);
                         // PutField consumes both, but assignment should return the value
                         // Re-push the value by getting it again
-                        EmitOp(OpCode.PushThis);
+                        EmitGlobalObject();
                         EmitOp(OpCode.GetField);
                         EmitAtom(lhsAtom);
                         break;
@@ -713,6 +716,17 @@ public sealed class Parser
                     case LhsKind.Argument:
                         EmitOp(OpCode.SetArg);
                         EmitU16((ushort)lhsIndex);
+                        break;
+                    case LhsKind.Property:
+                        if (lhsIsComputed)
+                        {
+                            EmitOp(OpCode.PutArrayEl);
+                        }
+                        else
+                        {
+                            EmitOp(OpCode.PutField);
+                            EmitAtom(lhsAtom);
+                        }
                         break;
                     default:
                         // Fallback to PutRefValue (might not work for all cases)
@@ -1242,6 +1256,12 @@ public sealed class Parser
                 var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 NextToken(); // consume the identifier
 
+                _lastLhsKind = LhsKind.Property;
+                _lastLhsAtom = atom;
+                _lastLhsIndex = -1;
+                _lastLhsBytecodePos = _currentFunction.ByteCode.Size;
+                _lastLhsIsComputed = false;
+
                 // Check if this is a method call: obj.method()
                 if ((flags & ParseFlags.PostfixCall) != 0 && Check(TokenType.LeftParen))
                 {
@@ -1287,6 +1307,13 @@ public sealed class Parser
             {
                 ParseExpression();
                 Expect(TokenType.RightBracket);
+
+                _lastLhsKind = LhsKind.Property;
+                _lastLhsAtom = JSAtom.Empty;
+                _lastLhsIndex = -1;
+                _lastLhsBytecodePos = _currentFunction.ByteCode.Size;
+                _lastLhsIsComputed = true;
+
                 EmitOp(OpCode.GetArrayEl);
                 continue;
             }
@@ -1712,7 +1739,8 @@ public sealed class Parser
         // Resolve labels before adding to parent
         _currentFunction.ByteCode.ResolveLabels();
 
-        int funcIdx = parentFunction.AddChildFunction(newFunction);
+        parentFunction.AddChildFunction(newFunction);
+        int funcConstIdx = newFunction.ParentCPoolIndex;
         _currentFunction = parentFunction;
         _withScopeStack.Clear();
         _withScopeStack.AddRange(savedWithScopes);
@@ -1720,7 +1748,7 @@ public sealed class Parser
         _withScopeStack.AddRange(savedWithScopes);
 
         EmitOp(OpCode.FClosure);
-        EmitU32((uint)funcIdx);
+        EmitU32((uint)funcConstIdx);
     }
 
     /// <summary>
@@ -1864,11 +1892,12 @@ public sealed class Parser
         // Resolve labels before adding to parent
         _currentFunction.ByteCode.ResolveLabels();
 
-        int funcIdx = parentFunction.AddChildFunction(newFunction);
+        parentFunction.AddChildFunction(newFunction);
+        int funcConstIdx = newFunction.ParentCPoolIndex;
         _currentFunction = parentFunction;
 
         EmitOp(OpCode.FClosure);
-        EmitU32((uint)funcIdx);
+        EmitU32((uint)funcConstIdx);
     }
     /// <summary>
     /// Parses an async expression: async function or async arrow function
@@ -2486,14 +2515,15 @@ public sealed class Parser
         // Resolve labels before adding to parent
         _currentFunction.ByteCode.ResolveLabels();
 
-        int funcIdx = parentFunction.AddChildFunction(blockFunction);
+        parentFunction.AddChildFunction(blockFunction);
+        int funcConstIdx = blockFunction.ParentCPoolIndex;
         _currentFunction = parentFunction;
         _withScopeStack.Clear();
         _withScopeStack.AddRange(savedWithScopes);
 
         // Emit the static block execution
         EmitOp(OpCode.FClosure);
-        EmitU32((uint)funcIdx);
+        EmitU32((uint)funcConstIdx);
         EmitOp(OpCode.CallMethod);
         EmitU16(0); // no arguments
         EmitOp(OpCode.Drop); // discard result
@@ -3051,6 +3081,21 @@ public sealed class Parser
     private void EmitIdentifier()
     {
         var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
+
+        var argumentsAtom = _atoms.GetOrCreateAtom("arguments");
+        if (atom == argumentsAtom && _currentFunction.HasArgumentsBinding)
+        {
+            _lastLhsKind = LhsKind.None;
+            _lastLhsAtom = JSAtom.Empty;
+            _lastLhsIndex = -1;
+            _lastLhsBytecodePos = -1;
+            _lastLhsWithScope = false;
+            _lastLhsIsComputed = false;
+
+            EmitOp(OpCode.SpecialObject);
+            EmitU8((byte)(_currentFunction.IsStrict ? SpecialObjectType.Arguments : SpecialObjectType.MappedArguments));
+            return;
+        }
         
         // Track LHS info for potential assignment
         _lastLhsBytecodePos = _currentFunction.ByteCode.Size;
@@ -3085,7 +3130,27 @@ public sealed class Parser
             }
             else
             {
-                resolvedKind = LhsKind.GlobalVar;
+                // Fall back to lexical variables in active scopes
+                int lexIdx = -1;
+                for (int i = _currentFunction.Vars.Count - 1; i >= 0; i--)
+                {
+                    var varDef = _currentFunction.Vars[i];
+                    if (varDef.Name.Equals(atom) && varDef.ScopeLevel <= _currentFunction.ScopeLevel)
+                    {
+                        lexIdx = i;
+                        break;
+                    }
+                }
+
+                if (lexIdx >= 0)
+                {
+                    resolvedKind = LhsKind.LocalVar;
+                    resolvedIndex = lexIdx;
+                }
+                else
+                {
+                    resolvedKind = LhsKind.GlobalVar;
+                }
             }
         }
 
@@ -3134,11 +3199,17 @@ public sealed class Parser
                 EmitU16((ushort)index);
                 break;
             case LhsKind.GlobalVar:
-                EmitOp(OpCode.PushThis);
+                EmitGlobalObject();
                 EmitOp(OpCode.GetField);
                 EmitAtom(atom);
                 break;
         }
+    }
+
+    private void EmitGlobalObject()
+    {
+        EmitOp(OpCode.SpecialObject);
+        EmitU8((byte)SpecialObjectType.VarObject);
     }
 
     private void EmitPrefixUpdate(OpCode updateOp)
@@ -3154,7 +3225,7 @@ public sealed class Parser
         {
             case LhsKind.GlobalVar:
                 EmitOp(OpCode.Dup);
-                EmitOp(OpCode.PushThis);
+                EmitGlobalObject();
                 EmitOp(OpCode.Swap);
                 EmitOp(OpCode.PutField);
                 EmitAtom(lhsAtom);
@@ -3183,7 +3254,7 @@ public sealed class Parser
         switch (lhsKind)
         {
             case LhsKind.GlobalVar:
-                EmitOp(OpCode.PushThis);
+                EmitGlobalObject();
                 EmitOp(OpCode.Swap);
                 EmitOp(OpCode.PutField);
                 EmitAtom(lhsAtom);
@@ -3323,6 +3394,7 @@ public sealed class Parser
         // Parse the constructor expression (can be member expression)
         // We need to parse the constructor without consuming the call parens
         ParseMemberExpression();
+        EmitOp(OpCode.Dup); // newTarget is the same as constructor
 
         // Check for arguments
         int argc = 0;
@@ -3371,6 +3443,12 @@ public sealed class Parser
                 var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
                 NextToken();
 
+                _lastLhsKind = LhsKind.Property;
+                _lastLhsAtom = atom;
+                _lastLhsIndex = -1;
+                _lastLhsBytecodePos = _currentFunction.ByteCode.Size;
+                _lastLhsIsComputed = false;
+
                 EmitOp(OpCode.GetField);
                 EmitAtom(atom);
             }
@@ -3379,6 +3457,13 @@ public sealed class Parser
                 // Computed property access: obj[expr]
                 ParseExpression();
                 Expect(TokenType.RightBracket);
+
+                _lastLhsKind = LhsKind.Property;
+                _lastLhsAtom = JSAtom.Empty;
+                _lastLhsIndex = -1;
+                _lastLhsBytecodePos = _currentFunction.ByteCode.Size;
+                _lastLhsIsComputed = true;
+
                 EmitOp(OpCode.GetArrayEl);
             }
             else
@@ -3717,7 +3802,7 @@ public sealed class Parser
                     {
                         // Stack: [value]
                         // Get global object (this in global scope), then set property
-                        EmitOp(OpCode.PushThis);         // Stack: [value, globalThis]
+                        EmitGlobalObject();              // Stack: [value, globalThis]
                         EmitOp(OpCode.Swap);             // Stack: [globalThis, value]
                         EmitOp(OpCode.PutField);         // Stack: [] (PutField pops obj and value)
                         EmitAtom(atom);
@@ -3746,7 +3831,7 @@ public sealed class Parser
                 {
                     // Initialize global var to undefined
                     EmitOp(OpCode.Undefined);
-                    EmitOp(OpCode.PushThis);
+                    EmitGlobalObject();
                     EmitOp(OpCode.Swap);
                     EmitOp(OpCode.PutField);             // Stack: [] (PutField pops obj and value)
                     EmitAtom(atom);
@@ -4402,7 +4487,7 @@ public sealed class Parser
         switch (target.Kind)
         {
             case LhsKind.GlobalVar:
-                EmitOp(OpCode.PushThis);
+                EmitGlobalObject();
                 EmitOp(OpCode.Swap);
                 EmitOp(OpCode.PutField);
                 EmitAtom(target.Atom);
@@ -4799,11 +4884,10 @@ public sealed class Parser
                 NextToken();
                 Expect(TokenType.RightParen);
 
-                // Define catch variable and store exception
-                // For now, just drop the exception - proper variable binding needs scope resolution
-                // TODO: Implement proper scope resolution to transform ScopePutVar to PutVarRef
-                _currentFunction.AddVar(atom, JSVarKind.Normal, false, true);
-                EmitOp(OpCode.Drop);  // Drop exception value for now
+                // Define catch variable and store exception.
+                int catchVarIndex = _currentFunction.AddVar(atom, JSVarKind.Normal, false, true);
+                EmitOp(OpCode.PutLoc);
+                EmitU16((ushort)catchVarIndex);
             }
             else
             {
@@ -5091,7 +5175,8 @@ public sealed class Parser
         _currentFunction.ByteCode.ResolveLabels();
 
         // Add the function to the parent's child functions
-        int funcIdx = parentFunction.AddChildFunction(newFunction);
+        parentFunction.AddChildFunction(newFunction);
+        int funcConstIdx = newFunction.ParentCPoolIndex;
 
         // Switch back to the parent function
         _currentFunction = parentFunction;
@@ -5100,7 +5185,7 @@ public sealed class Parser
 
         // Emit code to create the function object (closure)
         EmitOp(OpCode.FClosure);
-        EmitU32((uint)funcIdx);
+        EmitU32((uint)funcConstIdx);
 
         // For function declarations, store in the variable
         if (funcType == JSParseFunctionType.Statement && !funcName.IsEmpty)
@@ -5111,7 +5196,7 @@ public sealed class Parser
             {
                 // Stack: [function]
                 // Store as global property: globalThis.funcName = function
-                EmitOp(OpCode.PushThis);         // Stack: [function, globalThis]
+                EmitGlobalObject();              // Stack: [function, globalThis]
                 EmitOp(OpCode.Swap);             // Stack: [globalThis, function]
                 EmitOp(OpCode.PutField);         // Stack: [] (PutField pops obj and value)
                 EmitAtom(funcName);
