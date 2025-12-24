@@ -1,35 +1,53 @@
-## Executing tests
+# QuickJS.NET
 
-Investigating tests should target a single framework for faster feedback loop (`-f [TFM]`)
-Validating all tests are passing should be done without limiting the target framework.
+This repository contains two implementations of QuickJS
+1- The original C based QuickJS implementation, at the root
+2- The .NET version, QuickJS.NET, in the `csharp` folder
 
-- All tests on all frameworks
+When implementing a feature in QuickJS.NET always try to follow the original C implementation design.
+
+## Building
+
+The whole QuickJS.NET solution
 
 ```shell
-dotnet test --project tests/QuickJS.Tests/QuickJS.Tests.csproj 
+dotnet build ./csharp/QuickJS.NET.slnx
 ```
 
-- Specific framework
+The QuickJS.Core project
 
 ```shell
-dotnet test --project tests/QuickJS.Tests/QuickJS.Tests.csproj 
- -f net10.0
- ```
-
-- Specific test class
-
-```shell
-dotnet test --project tests/QuickJS.Tests/QuickJS.Tests.csproj --filter-class 'QuickJS.Tests.BuiltinsArrayTests'
+dotnet build ./csharp/src/QuickJS.Core/QuickJS.Core.csproj
 ```
 
-- Specific test method
+## Testing
+
+All tests
 
 ```shell
-dotnet test --project tests/QuickJS.Tests/QuickJS.Tests.csproj --filter-class 'QuickJS.Tests.BuiltinsArrayTests.ArrayConstructor_WithElements_SetsLengthAndValues'
+cd csharp && dotnet test
 ```
 
-or using a filter with only the method name
+A specific test
 
 ```shell
-dotnet test --project tests/QuickJS.Tests/QuickJS.Tests.csproj --filter-class '*.ArrayConstructor_WithElements_SetsLengthAndValues'
+cd csharp && dotnet test --filter-method '*[MethodName]*'
+```
+
+## Benchmarking
+
+QuickJS.NET is benchmarked against Jint, a popular .NET JavaScript interpreter.
+
+Benchmarks for QuickJS.NET are implemented in `./csharp/benchmarks/QuickJS.Benchmarks`.
+
+To run a single benchmark:
+
+```shell
+dotnet run --project ./csharp/benchmarks/QuickJS.Benchmarks/QuickJS.Benchmarks.csproj -c release --filter `*QuickJS_Arithmetic*`
+```
+
+To run all QuickJS.NET benchmarks
+
+```shell
+dotnet run --project ./csharp/benchmarks/QuickJS.Benchmarks/QuickJS.Benchmarks.csproj -c release --filter `*QuickJS_*`
 ```

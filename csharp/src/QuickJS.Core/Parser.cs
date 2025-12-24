@@ -52,7 +52,8 @@ public sealed class Parser
     private Token _currentToken;
     private JSFunctionDef _currentFunction;
     private bool _isModule;
-    private readonly DiagnosticBag _diagnostics = new DiagnosticBag();
+    private DiagnosticBag? _diagnostics;
+    private readonly List<TokenType> _skipParensStack = new List<TokenType>(8);
     private List<int>? _withScopeStack;
     
     // LHS tracking for assignment
@@ -105,7 +106,7 @@ public sealed class Parser
     /// <summary>
     /// Gets the diagnostics collected during parsing.
     /// </summary>
-    public DiagnosticBag Diagnostics => _diagnostics;
+    public DiagnosticBag Diagnostics => _diagnostics ??= new();
 
     #region Token Handling
 
@@ -221,7 +222,7 @@ public sealed class Parser
             location,
             _fileName,
             context);
-        _diagnostics.Add(diagnostic);
+        Diagnostics.Add(diagnostic);
 
         // Return the exception (caller can throw it)
         return new JSSyntaxError(message, location);
@@ -304,8 +305,9 @@ public sealed class Parser
         var savedToken = _currentToken;
 
         // Track nesting with a stack
-        var stack = new Stack<TokenType>();
-        stack.Push(TokenType.EOF); // Sentinel
+        var stack = _skipParensStack;
+        stack.Clear();
+        stack.Add(TokenType.EOF); // Sentinel
 
         // Process tokens until we find the matching close or EOF
         while (true)
@@ -315,25 +317,25 @@ public sealed class Parser
                 case TokenType.LeftParen:
                 case TokenType.LeftBracket:
                 case TokenType.LeftBrace:
-                    stack.Push(_currentToken.Type);
+                    stack.Add(_currentToken.Type);
                     break;
 
                 case TokenType.RightParen:
-                    if (stack.Peek() != TokenType.LeftParen)
+                    if (stack[stack.Count - 1] != TokenType.LeftParen)
                         goto done;
-                    stack.Pop();
+                    stack.RemoveAt(stack.Count - 1);
                     break;
 
                 case TokenType.RightBracket:
-                    if (stack.Peek() != TokenType.LeftBracket)
+                    if (stack[stack.Count - 1] != TokenType.LeftBracket)
                         goto done;
-                    stack.Pop();
+                    stack.RemoveAt(stack.Count - 1);
                     break;
 
                 case TokenType.RightBrace:
-                    if (stack.Peek() != TokenType.LeftBrace)
+                    if (stack[stack.Count - 1] != TokenType.LeftBrace)
                         goto done;
-                    stack.Pop();
+                    stack.RemoveAt(stack.Count - 1);
                     break;
 
                 case TokenType.EOF:
@@ -1127,8 +1129,8 @@ public sealed class Parser
                 if (Check(TokenType.Identifier))
                 {
                     var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
-                    if (PeekToken(noLineTerminator: false) == TokenType.Dot ||
-                        PeekToken(noLineTerminator: false) == TokenType.LeftBracket)
+                    var nextType = PeekToken(noLineTerminator: false);
+                    if (nextType == TokenType.Dot || nextType == TokenType.LeftBracket)
                     {
                         ParsePostfixExpression(ParseFlags.None);
                         EmitOp(OpCode.Delete);
@@ -3091,8 +3093,7 @@ public sealed class Parser
     {
         var atom = _atoms.GetOrCreateAtom(_currentToken.Text.Span);
 
-        var argumentsAtom = _atoms.GetOrCreateAtom("arguments");
-        if (atom == argumentsAtom && _currentFunction.HasArgumentsBinding)
+        if (atom == _atoms.GetOrCreateAtom("arguments") && _currentFunction.HasArgumentsBinding)
         {
             _lastLhsKind = LhsKind.None;
             _lastLhsAtom = JSAtom.Empty;
@@ -3502,13 +3503,21 @@ public sealed class Parser
         {
             // Track the completion value of the script (like QuickJS eval_ret).
             // Ensure exactly one value is left on the stack when the program finishes.
-            EmitOp(OpCode.Undefined);
+            bool hasCompletionValue = false;
             while (!Check(TokenType.EOF))
             {
-                // Drop previous statement's completion value (initially undefined)
-                // before evaluating the next statement.
-                EmitOp(OpCode.Drop);
+                // Drop previous statement's completion value before evaluating the next statement.
+                if (hasCompletionValue)
+                {
+                    EmitOp(OpCode.Drop);
+                }
                 ParseStatement(preserveCompletionValue: true);
+                hasCompletionValue = true;
+            }
+
+            if (!hasCompletionValue)
+            {
+                EmitOp(OpCode.Undefined);
             }
         }
         
@@ -3678,11 +3687,19 @@ public sealed class Parser
 
         if (preserveCompletionValue)
         {
-            EmitOp(OpCode.Undefined);
+            bool hasCompletionValue = false;
             while (!Check(TokenType.RightBrace) && !Check(TokenType.EOF))
             {
-                EmitOp(OpCode.Drop);
+                if (hasCompletionValue)
+                {
+                    EmitOp(OpCode.Drop);
+                }
                 ParseStatement(preserveCompletionValue: true);
+                hasCompletionValue = true;
+            }
+            if (!hasCompletionValue)
+            {
+                EmitOp(OpCode.Undefined);
             }
         }
         else
