@@ -164,16 +164,26 @@ public sealed partial class AtomTable : IDisposable
     /// <exception cref="ArgumentOutOfRangeException">Thrown if the atom is invalid.</exception>
     public string GetString(in JSAtom atom)
     {
+        return GetString(atom.Value);
+    }
+
+    /// <summary>
+    /// Gets the string represented by an atom value.
+    /// </summary>
+    /// <param name="atomValue">The atom value to look up.</param>
+    /// <returns>The string represented by the atom.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown if the atom is invalid.</exception>
+    public string GetString(uint atomValue)
+    {
         _lock.EnterReadLock();
         try
         {
-            uint index = atom.Value;
-            if (index >= (uint)_atomToString.Count)
+            if (atomValue >= (uint)_atomToString.Count)
             {
-                throw new ArgumentOutOfRangeException(nameof(atom), $"Invalid atom: {atom}");
+                throw new ArgumentOutOfRangeException(nameof(atomValue), $"Invalid atom: {atomValue}");
             }
 
-            return _atomToString[(int)index];
+            return _atomToString[(int)atomValue];
         }
         finally
         {

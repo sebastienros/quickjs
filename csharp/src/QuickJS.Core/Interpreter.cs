@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Diagnostics;
 
 namespace QuickJS;
 
@@ -3326,7 +3327,7 @@ public sealed class Interpreter
                             Push(JSValue.Undefined);
                             break;
                         }
-                        string name = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        string name = _context.Runtime.AtomTable.GetString(atom);
                         int varIndex = function.FindVarIndex(name);
                         if (varIndex < 0)
                         {
@@ -3477,7 +3478,7 @@ public sealed class Interpreter
                         var thisVal = _stack[objIndex];
                         
                         // Get the method from the object using the atom
-                        var methodName = _context.Runtime.AtomTable.GetString(new JSAtom((uint)atomId));
+                        var methodName = _context.Runtime.AtomTable.GetString((uint)atomId);
                         JSValue callee;
                         if (thisVal.IsObject)
                         {
@@ -3984,7 +3985,7 @@ public sealed class Interpreter
                                           (bytecode[pc + 2] << 16) |
                                           (bytecode[pc + 3] << 24));
                         pc += 4;
-                        string propName = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        string propName = _context.Runtime.AtomTable.GetString(atom);
                         GetField(propName);
                     }
                     break;
@@ -4001,7 +4002,7 @@ public sealed class Interpreter
                                           (bytecode[pc + 2] << 16) |
                                           (bytecode[pc + 3] << 24));
                         pc += 4;
-                        string propName = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        string propName = _context.Runtime.AtomTable.GetString(atom);
                         GetField2(propName);
                     }
                     break;
@@ -4018,7 +4019,7 @@ public sealed class Interpreter
                                           (bytecode[pc + 2] << 16) |
                                           (bytecode[pc + 3] << 24));
                         pc += 4;
-                        string propName = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        string propName = _context.Runtime.AtomTable.GetString(atom);
                         PutField(propName);
                     }
                     break;
@@ -4035,7 +4036,7 @@ public sealed class Interpreter
                                           (bytecode[pc + 2] << 16) |
                                           (bytecode[pc + 3] << 24));
                         pc += 4;
-                        string propName = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        string propName = _context.Runtime.AtomTable.GetString(atom);
                         DefineField(propName);
                     }
                     break;
@@ -4081,7 +4082,7 @@ public sealed class Interpreter
                                           (bytecode[pc + 2] << 16) |
                                           (bytecode[pc + 3] << 24));
                         pc += 4;
-                        string name = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
+                        string name = _context.Runtime.AtomTable.GetString(atom);
                         bool deleted = _context.GlobalObject.Delete(name);
                         Push(JSValue.FromBoolean(deleted));
                     }
@@ -4093,11 +4094,7 @@ public sealed class Interpreter
                 case OpCode.WithMakeRef:
                 case OpCode.WithGetRef:
                     {
-                        if (pc + 9 > bytecode.Length)
-                        {
-                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
-                            return JSValue.Exception;
-                        }
+                        Debug.Assert(pc + 9 <= bytecode.Length);
                         uint atom = (uint)(bytecode[pc] |
                                           (bytecode[pc + 1] << 8) |
                                           (bytecode[pc + 2] << 16) |
@@ -4109,12 +4106,7 @@ public sealed class Interpreter
                         byte isWith = bytecode[pc + 8];
                         pc += 9;
 
-                        string name = _context.Runtime.AtomTable.GetString(new JSAtom(atom));
-                        if (_stackPointer < 1)
-                        {
-                            _context.ThrowError(JSErrorType.RangeError, "Stack underflow");
-                            return JSValue.Exception;
-                        }
+                        Debug.Assert(_stackPointer >= 1);
 
                         var objVal = Peek();
                         if (!objVal.IsObject)
@@ -4130,6 +4122,7 @@ public sealed class Interpreter
                             break;
                         }
 
+                        string name = _context.Runtime.AtomTable.GetString(atom);
                         bool hasProperty = obj.HasProperty(name);
                         if (hasProperty && isWith != 0 && IsUnscopable(obj, name))
                         {

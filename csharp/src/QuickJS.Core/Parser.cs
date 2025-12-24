@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 
 namespace QuickJS;
 
@@ -52,7 +53,7 @@ public sealed class Parser
     private JSFunctionDef _currentFunction;
     private bool _isModule;
     private readonly DiagnosticBag _diagnostics = new DiagnosticBag();
-    private readonly List<int> _withScopeStack = new List<int>();
+    private List<int>? _withScopeStack;
     
     // LHS tracking for assignment
     private enum LhsKind { None, GlobalVar, LocalVar, Argument, Property }
@@ -468,6 +469,11 @@ public sealed class Parser
 
     private void EmitWithPutVarChain(JSAtom atom, int labelDone)
     {
+        if (_withScopeStack == null)
+        {
+            return;
+        }
+    
         for (int i = _withScopeStack.Count - 1; i >= 0; i--)
         {
             EmitOp(OpCode.Dup);
@@ -480,6 +486,11 @@ public sealed class Parser
 
     private void EmitWithDeleteVarChain(JSAtom atom, int labelDone)
     {
+        if (_withScopeStack == null)
+        {
+            return;
+        }
+
         for (int i = _withScopeStack.Count - 1; i >= 0; i--)
         {
             EmitOp(OpCode.GetLoc);
@@ -688,7 +699,7 @@ public sealed class Parser
                 ParseAssignExpression(flags);
 
                 int labelDone = -1;
-                if (lhsWithScope && _withScopeStack.Count > 0)
+                if (lhsWithScope && _withScopeStack?.Count > 0)
                 {
                     labelDone = NewLabel();
                     EmitWithPutVarChain(lhsAtom, labelDone);
@@ -1125,7 +1136,7 @@ public sealed class Parser
                     else
                     {
                         NextToken();
-                        if (_withScopeStack.Count > 0)
+                        if (_withScopeStack?.Count > 0)
                         {
                             int labelDone = NewLabel();
                             EmitWithDeleteVarChain(atom, labelDone);
@@ -1689,8 +1700,8 @@ public sealed class Parser
     {
         // Save parent and create new function
         var parentFunction = _currentFunction;
-        var savedWithScopes = _withScopeStack.ToArray();
-        _withScopeStack.Clear();
+        var savedWithScopes = _withScopeStack ?? [];
+        _withScopeStack = [];
         var newFunction = new JSFunctionDef(JSAtom.Empty);
         newFunction.Filename = parentFunction.Filename;
         newFunction.Parent = parentFunction;
@@ -1742,8 +1753,6 @@ public sealed class Parser
         parentFunction.AddChildFunction(newFunction);
         int funcConstIdx = newFunction.ParentCPoolIndex;
         _currentFunction = parentFunction;
-        _withScopeStack.Clear();
-        _withScopeStack.AddRange(savedWithScopes);
         _withScopeStack.Clear();
         _withScopeStack.AddRange(savedWithScopes);
 
@@ -2486,8 +2495,8 @@ public sealed class Parser
     {
         // Create a new function for the static block
         var parentFunction = _currentFunction;
-        var savedWithScopes = _withScopeStack.ToArray();
-        _withScopeStack.Clear();
+        var savedWithScopes = _withScopeStack ?? [];
+        _withScopeStack = new();
         var staticBlockName = _atoms.GetOrCreateAtom("static_block");
         var blockFunction = new JSFunctionDef(staticBlockName);
         _currentFunction = blockFunction;
@@ -3099,7 +3108,7 @@ public sealed class Parser
         
         // Track LHS info for potential assignment
         _lastLhsBytecodePos = _currentFunction.ByteCode.Size;
-        _lastLhsWithScope = _withScopeStack.Count > 0;
+        _lastLhsWithScope = _withScopeStack?.Count > 0;
 
         LhsKind resolvedKind;
         int resolvedIndex = -1;
@@ -3158,7 +3167,7 @@ public sealed class Parser
         _lastLhsAtom = atom;
         _lastLhsIndex = resolvedIndex;
 
-        if (_withScopeStack.Count > 0)
+        if (_withScopeStack?.Count > 0)
         {
             int labelDone = NewLabel();
             for (int i = _withScopeStack.Count - 1; i >= 0; i--)
@@ -4419,7 +4428,7 @@ public sealed class Parser
         EmitOp(OpCode.PutLoc);
         EmitU16((ushort)withIdx);
 
-        _withScopeStack.Add(withIdx);
+        (_withScopeStack ??= []).Add(withIdx);
         ParseStatement(preserveCompletionValue);
         _withScopeStack.RemoveAt(_withScopeStack.Count - 1);
         _currentFunction.PopScope();
@@ -5094,8 +5103,8 @@ public sealed class Parser
 
         // Save the parent function and create a new function definition
         var parentFunction = _currentFunction;
-        var savedWithScopes = _withScopeStack.ToArray();
-        _withScopeStack.Clear();
+        var savedWithScopes = _withScopeStack ?? [];
+        _withScopeStack = [];
         var newFunction = new JSFunctionDef(funcName);
         newFunction.Filename = parentFunction.Filename;
         newFunction.Parent = parentFunction;
