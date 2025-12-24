@@ -158,9 +158,9 @@ public class StatementParserTests
         parser.ParseStatement();
 
         var bytecode = parser.CurrentFunction.ByteCode.ToArray();
-        // For top-level var, should have PushI32, PushThis, Swap, PutField (sets global property)
+        // For top-level var, should have PushI32, SpecialObject, PutField (sets global property)
         Assert.Contains((byte)OpCode.PushI32, bytecode);
-        Assert.Contains((byte)OpCode.PushThis, bytecode);
+        Assert.Contains((byte)OpCode.SpecialObject, bytecode);
         Assert.Contains((byte)OpCode.PutField, bytecode);
     }
 

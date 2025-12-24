@@ -119,6 +119,10 @@ public class JSFunction : JSObject
     // The declared length (number of parameters).
     private int _length;
 
+    // Arrow functions capture lexical this at creation time.
+    private readonly JSValue _lexicalThis;
+    private readonly bool _hasLexicalThis;
+
     #endregion
 
     #region Constructors
@@ -129,13 +133,19 @@ public class JSFunction : JSObject
     /// <param name="functionDef">The compiled function definition.</param>
     /// <param name="varRefs">Captured variable references from outer scopes.</param>
     /// <param name="prototype">The function's prototype (usually Function.prototype).</param>
-    public JSFunction(JSFunctionDef functionDef, JSVarRef[]? varRefs = null, JSObject? prototype = null)
+    /// <param name="lexicalThis">Lexical <c>this</c> for arrow functions.</param>
+    public JSFunction(JSFunctionDef functionDef, JSVarRef[]? varRefs = null, JSObject? prototype = null, JSValue? lexicalThis = null)
         : base(prototype, JSClassId.BytecodeFunction)
     {
         _functionDef = functionDef ?? throw new ArgumentNullException(nameof(functionDef));
         _varRefs = varRefs;
         _boundThis = JSValue.Undefined;
         _length = functionDef.ArgCount;
+        if (functionDef.FuncType == JSParseFunctionType.Arrow && lexicalThis.HasValue)
+        {
+            _lexicalThis = lexicalThis.Value;
+            _hasLexicalThis = true;
+        }
 
         // Set the name from the function definition
         if (!functionDef.FuncName.IsEmpty)
@@ -460,7 +470,14 @@ public class JSFunction : JSObject
         }
 
         // Not a bound function
-        resolvedThis = thisArg;
+        if (IsArrowFunction && _hasLexicalThis)
+        {
+            resolvedThis = _lexicalThis;
+        }
+        else
+        {
+            resolvedThis = thisArg;
+        }
         resolvedArgs = args;
         return this;
     }
@@ -502,8 +519,9 @@ public class JSFunction : JSObject
     /// <param name="functionDef">The function definition.</param>
     /// <param name="outerVarRefs">Variable references from the outer function.</param>
     /// <param name="prototype">The function prototype.</param>
+    /// <param name="lexicalThis">Lexical <c>this</c> for arrow functions.</param>
     /// <returns>The new function.</returns>
-    public static JSFunction CreateFromDef(JSFunctionDef functionDef, JSVarRef[]? outerVarRefs = null, JSObject? prototype = null)
+    public static JSFunction CreateFromDef(JSFunctionDef functionDef, JSVarRef[]? outerVarRefs = null, JSObject? prototype = null, JSValue? lexicalThis = null)
     {
         // Create var refs for this function's closure variables
         JSVarRef[]? varRefs = null;
@@ -529,7 +547,7 @@ public class JSFunction : JSObject
             }
         }
 
-        return new JSFunction(functionDef, varRefs, prototype);
+        return new JSFunction(functionDef, varRefs, prototype, lexicalThis);
     }
 
     /// <summary>

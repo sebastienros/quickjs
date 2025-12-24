@@ -1,4 +1,5 @@
 using BenchmarkDotNet.Attributes;
+using Jint;
 using Jint.Native;
 using Microsoft.VSDiagnostics;
 
@@ -19,6 +20,27 @@ public class EngineComparisonBenchmarks
         _quickJsRuntime = new JSRuntime();
         _quickJsContext = _quickJsRuntime.CreateContext();
         _jintEngine = new Jint.Engine();
+
+        if (QuickJS_Arithmetic().ToInt32() != 7) throw new InvalidOperationException("QuickJS arithmetic test failed");
+        if (Jint_Arithmetic().AsNumber() != 7) throw new InvalidOperationException("Jint arithmetic test failed");
+        if (QuickJS_Variables().ToInt32() != 43) throw new InvalidOperationException("QuickJS variables test failed");
+        if (Jint_Variables().AsNumber() != 43) throw new InvalidOperationException("Jint variables test failed");
+        if (QuickJS_Function().ToInt32() != 30) throw new InvalidOperationException("QuickJS function test failed");
+        if (Jint_Function().AsNumber() != 30) throw new InvalidOperationException("Jint function test failed");
+        if (QuickJS_Loop().ToInt32() != 4950) throw new InvalidOperationException("QuickJS loop test failed");
+        if (Jint_Loop().AsNumber() != 4950) throw new InvalidOperationException("Jint loop test failed");
+        if (QuickJS_String().ToString() != "hello world") throw new InvalidOperationException("QuickJS string test failed");
+        if (Jint_String().AsString() != "hello world") throw new InvalidOperationException("Jint string test failed");
+        if (QuickJS_Array().ToInt32() != 30) throw new InvalidOperationException("QuickJS array test failed");
+        if (Jint_Array().AsNumber() != 30) throw new InvalidOperationException("Jint array test failed");
+        if (QuickJS_Object().ToInt32() != 6) throw new InvalidOperationException("QuickJS object test failed");
+        if (Jint_Object().AsNumber() != 6) throw new InvalidOperationException("Jint object test failed");
+        if (QuickJS_Fibonacci().ToInt32() != 610) throw new InvalidOperationException("QuickJS fibonacci test failed");
+        if (Jint_Fibonacci().AsNumber() != 610) throw new InvalidOperationException("Jint fibonacci test failed");
+        if (QuickJS_HexParsing().ToInt32() != 1237282) throw new InvalidOperationException("QuickJS hex parsing test failed");
+        if (Jint_HexParsing().AsNumber() != 1237282) throw new InvalidOperationException("Jint hex parsing test failed");
+        if (QuickJS_BinaryOctalParsing().ToInt32() != 776) throw new InvalidOperationException("QuickJS binary/octal parsing test failed");
+        if (Jint_BinaryOctalParsing().AsNumber() != 776) throw new InvalidOperationException("Jint binary/octal parsing test failed");
     }
 
     [GlobalCleanup]
@@ -37,7 +59,7 @@ public class EngineComparisonBenchmarks
 
     // Variable assignment and retrieval
     [Benchmark]
-    public object QuickJS_Variables()
+    public JSValue QuickJS_Variables()
     {
         return _quickJsContext.Evaluate("var x = 42; x + 1");
     }

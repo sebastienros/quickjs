@@ -647,14 +647,13 @@ public class ParserTests
     [Fact]
     public void ParseExpression_Identifier_EmitsGlobalPropertyAccess()
     {
-        // For global vars, identifiers are accessed via PushThis + GetField
-        // since scope opcodes conflict with short opcodes
+        // For global vars, identifiers are accessed via SpecialObject + GetField
         var atoms = new AtomTable();
         var parser = new Parser("x", "test.js", atoms);
         parser.ParseExpression();
 
         var bytecode = parser.CurrentFunction.ByteCode.ToArray();
-        Assert.Contains((byte)OpCode.PushThis, bytecode);
+        Assert.Contains((byte)OpCode.SpecialObject, bytecode);
         Assert.Contains((byte)OpCode.GetField, bytecode);
     }
 

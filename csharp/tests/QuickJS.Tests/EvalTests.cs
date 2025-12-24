@@ -164,6 +164,35 @@ public class EvalTests
     }
 
     [Fact]
+    public void ArrowFunction_UsesLexicalThis()
+    {
+        var result = _context.Evaluate(@"
+            var obj = {
+                x: 41,
+                f: function() {
+                    return (() => this.x)();
+                }
+            };
+            obj.f();
+        ");
+
+        Assert.False(_context.HasException, _context.HasException ? GetExceptionMessage() : "");
+        Assert.Equal(41, result.ToInt32());
+
+        string GetExceptionMessage()
+        {
+            var exVal = _context.GetAndClearException();
+            if (exVal.IsObject)
+            {
+                var exObj = exVal.AsObject();
+                var msgVal = exObj.Get("message");
+                return msgVal.IsString ? msgVal.ToString()! : exVal.ToString()!;
+            }
+            return exVal.ToString()!;
+        }
+    }
+
+    [Fact]
     public void WithStatement_ResolvesProperties()
     {
         var result = _context.Evaluate(@"

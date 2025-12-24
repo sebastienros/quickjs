@@ -1071,6 +1071,36 @@ public sealed class Interpreter
         _stack[_stackPointer - 1] = JSValue.FromDouble(d - 1);
     }
 
+    private static JSValue IncrementValue(JSValue op)
+    {
+        if (op.IsInt)
+        {
+            int val = op.ToInt32();
+            if (val < int.MaxValue)
+            {
+                return JSValue.FromInt32(val + 1);
+            }
+        }
+
+        double d = JSValueConversion.ToNumber(op);
+        return JSValue.FromDouble(d + 1);
+    }
+
+    private static JSValue DecrementValue(JSValue op)
+    {
+        if (op.IsInt)
+        {
+            int val = op.ToInt32();
+            if (val > int.MinValue)
+            {
+                return JSValue.FromInt32(val - 1);
+            }
+        }
+
+        double d = JSValueConversion.ToNumber(op);
+        return JSValue.FromDouble(d - 1);
+    }
+
     /// <summary>
     /// Converts the top value to BigInt.
     /// </summary>
@@ -2023,6 +2053,28 @@ public sealed class Interpreter
         }
         var value = Peek();
         _currentFrame.SetLocal(index, value);
+    }
+
+    private void IncLoc(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var value = _currentFrame.GetLocal(index);
+        _currentFrame.SetLocal(index, IncrementValue(value));
+    }
+
+    private void DecLoc(int index)
+    {
+        if (_currentFrame == null)
+        {
+            _context.ThrowReferenceError("No active call frame");
+            return;
+        }
+        var value = _currentFrame.GetLocal(index);
+        _currentFrame.SetLocal(index, DecrementValue(value));
     }
 
     /// <summary>
@@ -3203,7 +3255,12 @@ public sealed class Interpreter
                             return JSValue.Exception;
                         }
                         var outerVarRefs = _currentFrame?.VarRefs;
-                        var fnObj = JSFunction.CreateFromDef(fnDef, outerVarRefs);
+                        JSValue? lexicalThis = null;
+                        if (fnDef.FuncType == JSParseFunctionType.Arrow && _currentFrame != null)
+                        {
+                            lexicalThis = _currentFrame.ThisValue;
+                        }
+                        var fnObj = JSFunction.CreateFromDef(fnDef, outerVarRefs, lexicalThis: lexicalThis);
                         InitializeFunctionPrototype(fnDef, fnObj);
                         Push(JSValue.FromObject(fnObj));
                     }
@@ -3243,7 +3300,12 @@ public sealed class Interpreter
                             return JSValue.Exception;
                         }
                         var outerVarRefs = _currentFrame?.VarRefs;
-                        var fnObj = JSFunction.CreateFromDef(fnDef, outerVarRefs);
+                        JSValue? lexicalThis = null;
+                        if (fnDef.FuncType == JSParseFunctionType.Arrow && _currentFrame != null)
+                        {
+                            lexicalThis = _currentFrame.ThisValue;
+                        }
+                        var fnObj = JSFunction.CreateFromDef(fnDef, outerVarRefs, lexicalThis: lexicalThis);
                         InitializeFunctionPrototype(fnDef, fnObj);
                         Push(JSValue.FromObject(fnObj));
                     }
@@ -3810,6 +3872,30 @@ public sealed class Interpreter
                         int idx = bytecode[pc] | (bytecode[pc + 1] << 8);
                         pc += 2;
                         SetLoc(idx);
+                    }
+                    break;
+                case OpCode.IncLoc:
+                    {
+                        if (pc + 1 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc];
+                        pc += 1;
+                        IncLoc(idx);
+                    }
+                    break;
+                case OpCode.DecLoc:
+                    {
+                        if (pc + 1 > bytecode.Length)
+                        {
+                            _context.ThrowError(JSErrorType.RangeError, "Bytecode overrun");
+                            return JSValue.Exception;
+                        }
+                        int idx = bytecode[pc];
+                        pc += 1;
+                        DecLoc(idx);
                     }
                     break;
 

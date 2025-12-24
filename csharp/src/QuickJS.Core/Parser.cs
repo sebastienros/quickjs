@@ -422,6 +422,72 @@ public sealed class Parser
         return TokenType.EOF;
     }
 
+    private TokenType PeekForInOfTokenFast(out bool needsFullScan)
+    {
+        var savedPos = _lexer.SavePosition();
+        var savedToken = _currentToken;
+
+        TokenType result = TokenType.EOF;
+        needsFullScan = false;
+
+        if (Check(TokenType.Var) || Check(TokenType.Let) || Check(TokenType.Const))
+        {
+            NextToken();
+            if (Check(TokenType.Identifier))
+            {
+                NextToken();
+                if (Check(TokenType.In))
+                {
+                    result = TokenType.In;
+                }
+                else if (Check(TokenType.Of))
+                {
+                    result = TokenType.Of;
+                }
+                else if (Check(TokenType.Assign) || Check(TokenType.Comma) || Check(TokenType.Semicolon) || Check(TokenType.RightParen))
+                {
+                    result = TokenType.EOF;
+                }
+                else
+                {
+                    needsFullScan = true;
+                }
+            }
+            else
+            {
+                needsFullScan = true;
+            }
+        }
+        else if (Check(TokenType.Identifier))
+        {
+            NextToken();
+            if (Check(TokenType.In))
+            {
+                result = TokenType.In;
+            }
+            else if (Check(TokenType.Of))
+            {
+                result = TokenType.Of;
+            }
+            else if (Check(TokenType.Assign) || Check(TokenType.Comma) || Check(TokenType.Semicolon) || Check(TokenType.RightParen))
+            {
+                result = TokenType.EOF;
+            }
+            else
+            {
+                needsFullScan = true;
+            }
+        }
+        else
+        {
+            needsFullScan = true;
+        }
+
+        _lexer.RestorePosition(savedPos);
+        _currentToken = savedToken;
+        return result;
+    }
+
     #endregion
 
     #region Bytecode Emission
@@ -1459,9 +1525,7 @@ public sealed class Parser
                 break;
 
             case TokenType.This:
-                EmitOp(OpCode.ScopeGetVar);
-                EmitAtom(_atoms.GetOrCreateAtom("this"));
-                EmitU16(0);
+                EmitOp(OpCode.PushThis);
                 NextToken();
                 break;
 
@@ -4349,7 +4413,11 @@ public sealed class Parser
         bool isAwait = Match(TokenType.Await);
         Expect(TokenType.LeftParen);
 
-        var forInOfToken = PeekForInOfToken();
+        var forInOfToken = PeekForInOfTokenFast(out bool needsFullScan);
+        if (needsFullScan)
+        {
+            forInOfToken = PeekForInOfToken();
+        }
         if (forInOfToken == TokenType.In || forInOfToken == TokenType.Of)
         {
             ParseForInOfStatement(isAwait, labelName);
@@ -4414,8 +4482,12 @@ public sealed class Parser
         EmitLabel(labelContinue);
         if (!Check(TokenType.RightParen))
         {
+            int updateStart = _currentFunction.ByteCode.Size;
             ParseExpression();
-            EmitOp(OpCode.Drop);
+            if (!TryOptimizeForUpdateExpression(updateStart))
+            {
+                EmitOp(OpCode.Drop);
+            }
         }
         EmitGoto(OpCode.Goto, labelTest);
         Expect(TokenType.RightParen);
@@ -4429,6 +4501,140 @@ public sealed class Parser
 
         PopBreakContext();
         _currentFunction.PopScope();
+    }
+
+    private bool TryOptimizeForUpdateExpression(int startPos)
+    {
+        var buffer = _currentFunction.ByteCode;
+        int end = buffer.Size;
+        if (startPos >= end)
+        {
+            return false;
+        }
+
+        var bytes = buffer.ToArray();
+
+        static ushort ReadU16(byte[] data, int offset)
+        {
+            return (ushort)(data[offset] | (data[offset + 1] << 8));
+        }
+
+        static uint ReadU32(byte[] data, int offset)
+        {
+            return (uint)(data[offset] |
+                          (data[offset + 1] << 8) |
+                          (data[offset + 2] << 16) |
+                          (data[offset + 3] << 24));
+        }
+
+        // Pattern: get_loc idx, [dup], inc/dec, set_loc idx, [drop]
+        int pos = startPos;
+        if (bytes[pos] == (byte)OpCode.GetLoc)
+        {
+            ushort idx = ReadU16(bytes, pos + 1);
+            pos += 3;
+            if (pos < end)
+            {
+                bool hasDup = bytes[pos] == (byte)OpCode.Dup;
+                if (hasDup)
+                {
+                    pos++;
+                }
+
+                if (pos < end && (bytes[pos] == (byte)OpCode.Inc || bytes[pos] == (byte)OpCode.Dec))
+                {
+                    OpCode updateOp = (OpCode)bytes[pos];
+                    pos++;
+
+                    if (pos + 2 < end && bytes[pos] == (byte)OpCode.SetLoc)
+                    {
+                        ushort idx2 = ReadU16(bytes, pos + 1);
+                        pos += 3;
+
+                        if (pos < end && bytes[pos] == (byte)OpCode.Drop)
+                        {
+                            pos++;
+                        }
+
+                        if (pos == end && idx == idx2 && idx <= byte.MaxValue)
+                        {
+                            buffer.Truncate(startPos);
+                            EmitOp(updateOp == OpCode.Inc ? OpCode.IncLoc : OpCode.DecLoc);
+                            EmitU8((byte)idx);
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Pattern: push_this, get_field atom, [dup], inc/dec, push_this, swap, put_field atom, [drop]
+        pos = startPos;
+        if (bytes[pos] == (byte)OpCode.PushThis)
+        {
+            pos++;
+            if (pos + 4 < end && bytes[pos] == (byte)OpCode.GetField)
+            {
+                uint atom = ReadU32(bytes, pos + 1);
+                pos += 5;
+
+                bool hasDup = pos < end && bytes[pos] == (byte)OpCode.Dup;
+                if (hasDup)
+                {
+                    pos++;
+                }
+
+                if (pos < end && (bytes[pos] == (byte)OpCode.Inc || bytes[pos] == (byte)OpCode.Dec))
+                {
+                    OpCode updateOp = (OpCode)bytes[pos];
+                    pos++;
+
+                    // Prefix form has a dup after inc/dec.
+                    if (!hasDup)
+                    {
+                        if (pos < end && bytes[pos] == (byte)OpCode.Dup)
+                        {
+                            pos++;
+                            hasDup = true;
+                        }
+                        else
+                        {
+                            return false;
+                        }
+                    }
+
+                    if (pos + 6 < end &&
+                        bytes[pos] == (byte)OpCode.PushThis &&
+                        bytes[pos + 1] == (byte)OpCode.Swap &&
+                        bytes[pos + 2] == (byte)OpCode.PutField)
+                    {
+                        uint atom2 = ReadU32(bytes, pos + 3);
+                        pos += 7;
+
+                        if (pos < end && bytes[pos] == (byte)OpCode.Drop)
+                        {
+                            pos++;
+                        }
+
+                        if (pos == end && atom2 == atom)
+                        {
+                            buffer.Truncate(startPos);
+                            EmitOp(OpCode.PushThis);
+                            EmitOp(OpCode.GetField);
+                            EmitAtom(new JSAtom(atom));
+                            EmitOp(updateOp);
+                            EmitOp(OpCode.PushThis);
+                            EmitOp(OpCode.Swap);
+                            EmitOp(OpCode.PutField);
+                            EmitAtom(new JSAtom(atom));
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private void ParseWithStatement(bool preserveCompletionValue)

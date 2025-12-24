@@ -1817,6 +1817,12 @@ public sealed class JSContext : IDisposable
             SetClassPrototype(JSClassId.Array, arrayProto);
         }
 
+        JSValue CallArrayCallback(JSFunction callback, JSValue thisArg, JSValue[] callArgs)
+        {
+            var interpreter = GetInterpreter();
+            return interpreter.CallFunction(JSValue.FromObject(callback), thisArg, callArgs);
+        }
+
         JSValue ArrayCtor(JSValue thisVal, JSValue[] args)
         {
             JSObject arr = new JSObject(arrayProto, JSClassId.Array);
@@ -2107,7 +2113,7 @@ public sealed class JSContext : IDisposable
             var thisArg = args.Length > 1 ? args[1] : JSValue.Undefined;
             for (uint i = 0; i < arr.ArrayLength; i++)
             {
-                callback.CallNative(thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
+                CallArrayCallback(callback, thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
             }
             return JSValue.Undefined;
         }
@@ -2124,7 +2130,7 @@ public sealed class JSContext : IDisposable
             var result = new JSObject(arrayProto, JSClassId.Array);
             for (uint i = 0; i < arr.ArrayLength; i++)
             {
-                var mapped = callback.CallNative(thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
+                var mapped = CallArrayCallback(callback, thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
                 result.Set(i, mapped);
             }
             return JSValue.FromObject(result);
@@ -2144,7 +2150,7 @@ public sealed class JSContext : IDisposable
             for (uint i = 0; i < arr.ArrayLength; i++)
             {
                 var val = arr.Get(i);
-                var keep = callback.CallNative(thisArg, new[] { val, JSValue.FromInt32((int)i), thisVal });
+                var keep = CallArrayCallback(callback, thisArg, new[] { val, JSValue.FromInt32((int)i), thisVal });
                 if (JSValueConversion.ToBoolean(keep))
                     result.Set(k++, val);
             }
@@ -2174,7 +2180,7 @@ public sealed class JSContext : IDisposable
             }
             for (; k < len; k++)
             {
-                accumulator = callback.CallNative(JSValue.Undefined, new[] { accumulator, arr.Get(k), JSValue.FromInt32((int)k), thisVal });
+                accumulator = CallArrayCallback(callback, JSValue.Undefined, new[] { accumulator, arr.Get(k), JSValue.FromInt32((int)k), thisVal });
             }
             return accumulator;
         }
@@ -2202,7 +2208,7 @@ public sealed class JSContext : IDisposable
             }
             for (; k >= 0; k--)
             {
-                accumulator = callback.CallNative(JSValue.Undefined, new[] { accumulator, arr.Get((uint)k), JSValue.FromInt32(k), thisVal });
+                accumulator = CallArrayCallback(callback, JSValue.Undefined, new[] { accumulator, arr.Get((uint)k), JSValue.FromInt32(k), thisVal });
             }
             return accumulator;
         }
@@ -2218,7 +2224,7 @@ public sealed class JSContext : IDisposable
             var thisArg = args.Length > 1 ? args[1] : JSValue.Undefined;
             for (uint i = 0; i < arr.ArrayLength; i++)
             {
-                var result = callback.CallNative(thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
+                var result = CallArrayCallback(callback, thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
                 if (!JSValueConversion.ToBoolean(result))
                     return JSValue.False;
             }
@@ -2236,7 +2242,7 @@ public sealed class JSContext : IDisposable
             var thisArg = args.Length > 1 ? args[1] : JSValue.Undefined;
             for (uint i = 0; i < arr.ArrayLength; i++)
             {
-                var result = callback.CallNative(thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
+                var result = CallArrayCallback(callback, thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
                 if (JSValueConversion.ToBoolean(result))
                     return JSValue.True;
             }
@@ -2255,7 +2261,7 @@ public sealed class JSContext : IDisposable
             for (uint i = 0; i < arr.ArrayLength; i++)
             {
                 var val = arr.Get(i);
-                var result = callback.CallNative(thisArg, new[] { val, JSValue.FromInt32((int)i), thisVal });
+                var result = CallArrayCallback(callback, thisArg, new[] { val, JSValue.FromInt32((int)i), thisVal });
                 if (JSValueConversion.ToBoolean(result))
                     return val;
             }
@@ -2273,7 +2279,7 @@ public sealed class JSContext : IDisposable
             var thisArg = args.Length > 1 ? args[1] : JSValue.Undefined;
             for (uint i = 0; i < arr.ArrayLength; i++)
             {
-                var result = callback.CallNative(thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
+                var result = CallArrayCallback(callback, thisArg, new[] { arr.Get(i), JSValue.FromInt32((int)i), thisVal });
                 if (JSValueConversion.ToBoolean(result))
                     return JSValue.FromInt32((int)i);
             }
@@ -2378,7 +2384,7 @@ public sealed class JSContext : IDisposable
                 JSValue iterator;
                 try
                 {
-                    iterator = iteratorFn.CallNative(arrayLike, Array.Empty<JSValue>());
+                    iterator = CallArrayCallback(iteratorFn, arrayLike, Array.Empty<JSValue>());
                 }
                 catch (InvalidOperationException ex)
                 {
@@ -2398,7 +2404,7 @@ public sealed class JSContext : IDisposable
                     JSValue step;
                     try
                     {
-                        step = nextFn.CallNative(iterator, Array.Empty<JSValue>());
+                        step = CallArrayCallback(nextFn, iterator, Array.Empty<JSValue>());
                     }
                     catch (InvalidOperationException ex)
                     {
@@ -2415,7 +2421,7 @@ public sealed class JSContext : IDisposable
 
                     var val = stepObj.Get("value");
                     if (mapFn != null)
-                        val = mapFn.CallNative(thisArg, new[] { val, JSValue.FromInt32(i) });
+                        val = CallArrayCallback(mapFn, thisArg, new[] { val, JSValue.FromInt32(i) });
                     result.Set((uint)i, val);
                 }
 
@@ -2431,7 +2437,7 @@ public sealed class JSContext : IDisposable
             {
                 var val = obj.Get((uint)i);
                 if (mapFn != null)
-                    val = mapFn.CallNative(thisArg, new[] { val, JSValue.FromInt32(i) });
+                    val = CallArrayCallback(mapFn, thisArg, new[] { val, JSValue.FromInt32(i) });
                 result.Set((uint)i, val);
             }
             return JSValue.FromObject(result);
